@@ -1,298 +1,366 @@
 'use strict';
 
-// ═══════════════════════════════════════════════
-//  GLOBALS
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
+//  DOM refs
+// ═══════════════════════════════════════
+const loadingEl     = document.getElementById('loading');
+const statusPill    = document.getElementById('status-pill');
+const gestureBadge  = document.getElementById('gesture-badge');
+const dropHint      = document.getElementById('drop-hint');
+const fileInput     = document.getElementById('file-input');
+const camBtn        = document.getElementById('cam-btn');
+const resetBtn      = document.getElementById('reset-btn');
+const webcamVideo   = document.getElementById('webcam-video');
+const handCanvas    = document.getElementById('hand-canvas');
+const handCtx       = handCanvas.getContext('2d');
+
+// ═══════════════════════════════════════
+//  Three.js globals
+// ═══════════════════════════════════════
 let scene, camera, renderer, stlMesh;
-let hands, mpCamera;
-let cameraActive = false;
+let animId = null;
 
-const loadingEl      = document.getElementById('loading');
-const statusBadge    = document.getElementById('status-badge');
-const gestureDisplay = document.getElementById('current-gesture');
-const fileInput      = document.getElementById('file-input');
-const camBtn         = document.getElementById('cam-btn');
-const resetBtn       = document.getElementById('reset-btn');
-const webcamVideo    = document.getElementById('webcam-video');
-const handCanvas     = document.getElementById('hand-canvas');
-const handCtx        = handCanvas.getContext('2d');
+// ═══════════════════════════════════════
+//  MediaPipe globals
+// ═══════════════════════════════════════
+let handsDetector = null;
+let mpCam         = null;
+let cameraActive  = false;
 
-// 제스처 상태
-const gesture = {
-  type: 'none',       // none | rotate | pan | pinch | open
+// ═══════════════════════════════════════
+//  제스처 상태
+// ═══════════════════════════════════════
+const gState = {
+  type: 'none',
   prevX: 0,
   prevY: 0,
-  prevPinchDist: 0,
 };
 
-// ═══════════════════════════════════════════════
-//  THREE.JS 초기화
-// ═══════════════════════════════════════════════
+// 배지 자동 숨김 타이머
+let badgeTimer = null;
+
+// ═══════════════════════════════════════
+//  Three.js 초기화
+// ═══════════════════════════════════════
 function initThree() {
-  const container = document.getElementById('viewer-container');
-  const canvas    = document.getElementById('three-canvas');
+  const wrap   = document.getElementById('viewer-wrap');
+  const canvas = document.getElementById('three-canvas');
 
-  // 씬
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111111);
+  scene.background = new THREE.Color(0xf0f2f8);
 
-  // 카메라
-  camera = new THREE.PerspectiveCamera(
-    45,
-    container.clientWidth / container.clientHeight,
-    0.01,
-    10000
-  );
-  camera.position.set(0, 0, 5);
+  camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.01, 10000);
+  camera.position.set(0, 0, 6);
 
-  // 렌더러
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  renderer.shadowMap.enabled = true;
 
   // 조명
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-  scene.add(ambient);
-
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  dirLight.position.set(5, 10, 7);
-  scene.add(dirLight);
-
-  const backLight = new THREE.DirectionalLight(0x8888ff, 0.3);
-  backLight.position.set(-5, -5, -5);
-  scene.add(backLight);
-
-  // 그리드 (파일 로드 전 안내용)
-  const grid = new THREE.GridHelper(10, 20, 0x222222, 0x1a1a1a);
-  grid.name = 'grid';
-  scene.add(grid);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir1 = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir1.position.set(5, 8, 6);
+  scene.add(dir1);
+  const dir2 = new THREE.DirectionalLight(0xaabbff, 0.3);
+  dir2.position.set(-5, -3, -4);
+  scene.add(dir2);
 
   // 리사이즈
-  window.addEventListener('resize', () => {
-    camera.aspect = container.clientWidth / container.clientHeight;
+  const ro = new ResizeObserver(() => {
+    camera.aspect = wrap.clientWidth / wrap.clientHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   });
+  ro.observe(wrap);
 
   // 렌더 루프
-  function animate() {
-    requestAnimationFrame(animate);
+  function loop() {
+    animId = requestAnimationFrame(loop);
     renderer.render(scene, camera);
   }
-  animate();
+  loop();
 }
 
-// ═══════════════════════════════════════════════
-//  STL 파서 (Three.js STLLoader 인라인 구현)
-//  — CDN r128 에는 STLLoader 가 별도 파일이므로
-//    직접 구현하여 외부 의존성 제거
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
+//  STL 파서 (ASCII + Binary 인라인)
+// ═══════════════════════════════════════
 function parseSTL(buffer) {
-  // ASCII vs Binary 판별
   const uint8 = new Uint8Array(buffer);
+  const head  = new TextDecoder().decode(uint8.slice(0, 80));
+  const isASCII = head.trimStart().startsWith('solid') && !/[^\x09\x0A\x0D\x20-\x7E]/.test(head);
 
-  function isASCII(buf) {
-    // 첫 256 바이트에 'solid' 키워드가 있고 제어문자 없으면 ASCII
-    const header = new TextDecoder().decode(buf.slice(0, 256));
-    return header.trimStart().startsWith('solid');
-  }
+  const positions = [];
+  const normals   = [];
 
-  const geometry = new THREE.BufferGeometry();
-  let positions = [];
-  let normals   = [];
-
-  if (isASCII(uint8)) {
-    // ── ASCII STL ──
-    const text = new TextDecoder().decode(uint8);
-    const lines = text.split('\n');
-    let normal = [0, 0, 0];
-
-    for (const raw of lines) {
+  if (isASCII) {
+    const text  = new TextDecoder().decode(uint8);
+    let normal  = [0, 0, 1];
+    for (const raw of text.split('\n')) {
       const line = raw.trim();
-
       if (line.startsWith('facet normal')) {
-        const parts = line.split(/\s+/);
-        normal = [parseFloat(parts[2]), parseFloat(parts[3]), parseFloat(parts[4])];
+        const p = line.split(/\s+/);
+        normal = [+p[2], +p[3], +p[4]];
       } else if (line.startsWith('vertex')) {
-        const parts = line.split(/\s+/);
-        positions.push(parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3]));
+        const p = line.split(/\s+/);
+        positions.push(+p[1], +p[2], +p[3]);
         normals.push(...normal);
       }
     }
   } else {
-    // ── Binary STL ──
-    const view       = new DataView(buffer);
-    const triCount   = view.getUint32(80, true);
-
-    for (let i = 0; i < triCount; i++) {
-      const offset = 84 + i * 50;
-
-      const nx = view.getFloat32(offset,      true);
-      const ny = view.getFloat32(offset + 4,  true);
-      const nz = view.getFloat32(offset + 8,  true);
-
+    const view  = new DataView(buffer);
+    const count = view.getUint32(80, true);
+    for (let i = 0; i < count; i++) {
+      const base = 84 + i * 50;
+      const nx = view.getFloat32(base,     true);
+      const ny = view.getFloat32(base + 4, true);
+      const nz = view.getFloat32(base + 8, true);
       for (let v = 0; v < 3; v++) {
-        const vOffset = offset + 12 + v * 12;
+        const vb = base + 12 + v * 12;
         positions.push(
-          view.getFloat32(vOffset,      true),
-          view.getFloat32(vOffset + 4,  true),
-          view.getFloat32(vOffset + 8,  true)
+          view.getFloat32(vb,     true),
+          view.getFloat32(vb + 4, true),
+          view.getFloat32(vb + 8, true)
         );
         normals.push(nx, ny, nz);
       }
     }
   }
 
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal',   new THREE.Float32BufferAttribute(normals,   3));
-  geometry.computeBoundingBox();
-
-  return geometry;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal',   new THREE.Float32BufferAttribute(normals,   3));
+  return geo;
 }
 
-// ═══════════════════════════════════════════════
-//  STL 로드 & 씬 배치
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
+//  STL 로드
+// ═══════════════════════════════════════
 function loadSTL(buffer) {
   try {
-    const geometry = parseSTL(buffer);
+    const geo = parseSTL(buffer);
 
-    // 기존 메시 제거
     if (stlMesh) {
       scene.remove(stlMesh);
       stlMesh.geometry.dispose();
       stlMesh.material.dispose();
+      stlMesh = null;
     }
 
-    // 그리드 숨기기
-    const grid = scene.getObjectByName('grid');
-    if (grid) grid.visible = false;
-
-    // 중심 정렬 & 정규화
-    geometry.computeBoundingBox();
-    const box    = geometry.boundingBox;
+    // 중심 정렬 & 스케일 정규화
+    geo.computeBoundingBox();
+    const box    = geo.boundingBox;
     const center = new THREE.Vector3();
     box.getCenter(center);
-    geometry.translate(-center.x, -center.y, -center.z);
+    geo.translate(-center.x, -center.y, -center.z);
 
-    const size   = new THREE.Vector3();
+    const size  = new THREE.Vector3();
     box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scale  = 3.0 / maxDim;
+    const scale = 3.2 / Math.max(size.x, size.y, size.z);
 
-    // 메시 생성
-    const material = new THREE.MeshPhongMaterial({
-      color:     0x4499ff,
-      specular:  0x222222,
-      shininess: 60,
+    const mat = new THREE.MeshPhongMaterial({
+      color:     0x3b6ef8,
+      specular:  0x99b4ff,
+      shininess: 80,
       side:      THREE.DoubleSide,
     });
 
-    stlMesh = new THREE.Mesh(geometry, material);
+    stlMesh = new THREE.Mesh(geo, mat);
     stlMesh.scale.setScalar(scale);
-    stlMesh.rotation.x = -Math.PI / 2; // STL 기본 방향 보정
+    stlMesh.rotation.x = -Math.PI / 2;
     scene.add(stlMesh);
 
-    // 카메라 리셋
+    dropHint.classList.add('hidden');
     resetView();
-
-    setStatus('STL 로드 완료 ✅', 'ready');
-  } catch (err) {
-    console.error(err);
-    setStatus('STL 파싱 오류 ❌', 'error');
+    setStatus('로드 완료 ✓', 'ready');
+  } catch (e) {
+    console.error(e);
+    setStatus('파싱 오류 ✕', 'error');
   }
 }
 
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
 //  뷰 초기화
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
 function resetView() {
-  camera.position.set(0, 0, 5);
+  camera.position.set(0, 0, 6);
   camera.lookAt(0, 0, 0);
   if (stlMesh) {
     stlMesh.position.set(0, 0, 0);
-    stlMesh.rotation.x = -Math.PI / 2;
-    stlMesh.rotation.y = 0;
-    stlMesh.rotation.z = 0;
+    stlMesh.rotation.set(-Math.PI / 2, 0, 0);
   }
 }
 
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
 //  상태 표시
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
 function setStatus(msg, type = '') {
-  statusBadge.textContent = msg;
-  statusBadge.className   = type ? `${type}` : '';
+  statusPill.textContent = msg;
+  statusPill.className   = type;
 }
 
-// ═══════════════════════════════════════════════
-//  손 랜드마크 유틸
-// ═══════════════════════════════════════════════
-
-/** 두 랜드마크 사이의 2D 거리 */
-function dist2D(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function showBadge(text) {
+  gestureBadge.textContent = text;
+  gestureBadge.classList.add('show');
+  clearTimeout(badgeTimer);
+  badgeTimer = setTimeout(() => gestureBadge.classList.remove('show'), 1800);
 }
 
-/**
- * 손가락이 펴져 있으면 true
- * tip(끝) y 좌표가 pip(두 번째 마디) y 좌표보다 작으면 펴진 것
- * (MediaPipe 좌표계: y는 아래로 증가)
- */
-function isFingerUp(lm, tipIdx, pipIdx) {
-  return lm[tipIdx].y < lm[pipIdx].y;
+// ═══════════════════════════════════════
+//  마우스 드래그 조작
+// ═══════════════════════════════════════
+(function initMouseControl() {
+  const canvas = document.getElementById('three-canvas');
+  let down = false, lastX = 0, lastY = 0;
+
+  canvas.addEventListener('mousedown', e => {
+    down = true; lastX = e.clientX; lastY = e.clientY;
+  });
+  window.addEventListener('mouseup',   () => { down = false; });
+  window.addEventListener('mousemove', e => {
+    if (!down || !stlMesh) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+
+    if (e.shiftKey) {
+      // Shift + 드래그 → 이동
+      stlMesh.position.x += dx * 0.008;
+      stlMesh.position.y -= dy * 0.008;
+    } else {
+      // 드래그 → 회전
+      stlMesh.rotation.y += dx * 0.012;
+      stlMesh.rotation.x += dy * 0.012;
+    }
+  });
+
+  // 휠 → 줌
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const z = camera.position.z + e.deltaY * 0.01;
+    camera.position.z = Math.max(0.5, Math.min(20, z));
+  }, { passive: false });
+
+  // 터치 (모바일)
+  let touchPrev = null;
+  let pinchPrev = 0;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) touchPrev = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchPrev = Math.hypot(dx, dy);
+    }
+  });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!stlMesh) return;
+    if (e.touches.length === 1 && touchPrev) {
+      const dx = e.touches[0].clientX - touchPrev.x;
+      const dy = e.touches[0].clientY - touchPrev.y;
+      stlMesh.rotation.y += dx * 0.012;
+      stlMesh.rotation.x += dy * 0.012;
+      touchPrev = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const delta = (dist - pinchPrev) * 0.03;
+      camera.position.z = Math.max(0.5, Math.min(20, camera.position.z - delta));
+      pinchPrev = dist;
+    }
+  }, { passive: false });
+})();
+
+// ═══════════════════════════════════════
+//  버튼 조작
+// ═══════════════════════════════════════
+function bindBtn(id, fn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  let iv = null;
+  const start = () => { fn(); iv = setInterval(fn, 60); };
+  const stop  = () => clearInterval(iv);
+
+  el.addEventListener('mousedown',  start);
+  el.addEventListener('touchstart', e => { e.preventDefault(); start(); }, { passive: false });
+  el.addEventListener('mouseup',    stop);
+  el.addEventListener('mouseleave', stop);
+  el.addEventListener('touchend',   stop);
 }
 
-/**
- * 제스처 분류
- *  - pinch  : 엄지(4) + 검지(8) 가까움
- *  - one    : 검지만 폄
- *  - two    : 검지 + 중지 폄
- *  - open   : 4개 이상 폄
- *  - none   : 기타
- */
-function classifyGesture(lm) {
-  const thumbUp  = lm[4].y  < lm[3].y;
-  const indexUp  = isFingerUp(lm, 8,  6);
-  const middleUp = isFingerUp(lm, 12, 10);
-  const ringUp   = isFingerUp(lm, 16, 14);
-  const pinkyUp  = isFingerUp(lm, 20, 18);
+function initButtonControls() {
+  const ROT  = 0.04;
+  const MOVE = 0.06;
+  const ZOOM = 0.08;
 
-  const extCount = [thumbUp, indexUp, middleUp, ringUp, pinkyUp].filter(Boolean).length;
+  bindBtn('btn-rot-left',  () => stlMesh && (stlMesh.rotation.y -= ROT));
+  bindBtn('btn-rot-right', () => stlMesh && (stlMesh.rotation.y += ROT));
+  bindBtn('btn-rot-up',    () => stlMesh && (stlMesh.rotation.x -= ROT));
+  bindBtn('btn-rot-down',  () => stlMesh && (stlMesh.rotation.x += ROT));
 
-  // 핀치: 엄지-검지 거리 < 0.07 (정규화 좌표)
-  const pinchDist = dist2D(lm[4], lm[8]);
-  if (pinchDist < 0.07) return 'pinch';
+  bindBtn('btn-move-left',  () => stlMesh && (stlMesh.position.x -= MOVE));
+  bindBtn('btn-move-right', () => stlMesh && (stlMesh.position.x += MOVE));
+  bindBtn('btn-move-up',    () => stlMesh && (stlMesh.position.y += MOVE));
+  bindBtn('btn-move-down',  () => stlMesh && (stlMesh.position.y -= MOVE));
 
-  if (extCount >= 4)                       return 'open';
-  if (indexUp && middleUp && !ringUp)      return 'two';
-  if (indexUp && !middleUp)                return 'one';
+  bindBtn('btn-zoom-in',  () => { camera.position.z = Math.max(0.5, camera.position.z - ZOOM); });
+  bindBtn('btn-zoom-out', () => { camera.position.z = Math.min(20,  camera.position.z + ZOOM); });
+}
+
+// ═══════════════════════════════════════
+//  손 제스처 분류 (개선)
+// ═══════════════════════════════════════
+function fingerUp(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+
+function classifyHand(lm) {
+  const thumbUp  = lm[4].x < lm[3].x;   // 오른손 기준 엄지 펼침 (x축)
+  const indexUp  = fingerUp(lm, 8,  6);
+  const middleUp = fingerUp(lm, 12, 10);
+  const ringUp   = fingerUp(lm, 16, 14);
+  const pinkyUp  = fingerUp(lm, 20, 18);
+
+  const ext = [thumbUp, indexUp, middleUp, ringUp, pinkyUp].filter(Boolean).length;
+
+  // 손 펼침: 4개 이상
+  if (ext >= 4) return 'open';
+
+  // 엄지만 위 + 나머지 접힘 → 확대
+  if (thumbUp && !indexUp && !middleUp && !ringUp && !pinkyUp) return 'thumb_up';
+
+  // 엄지+새끼만 → 축소
+  if (thumbUp && !indexUp && !middleUp && !ringUp && pinkyUp) return 'pinky';
+
+  // 검지+중지 → 이동
+  if (indexUp && middleUp && !ringUp && !pinkyUp) return 'two';
+
+  // 검지만 → 회전
+  if (indexUp && !middleUp) return 'one';
 
   return 'none';
 }
 
-// ═══════════════════════════════════════════════
-//  MediaPipe Hands 초기화
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
+//  MediaPipe 초기화
+// ═══════════════════════════════════════
 function initMediaPipe() {
-  hands = new Hands({
-    locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+  handsDetector = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
   });
-
-  hands.setOptions({
-    maxNumHands:           1,
-    modelComplexity:       1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence:  0.6,
+  handsDetector.setOptions({
+    maxNumHands:            1,
+    modelComplexity:        1,
+    minDetectionConfidence: 0.75,
+    minTrackingConfidence:  0.65,
   });
-
-  hands.onResults(onHandResults);
+  handsDetector.onResults(onHandResults);
 }
 
-// ═══════════════════════════════════════════════
-//  웹캠 시작 / 중지
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════
+//  웹캠 시작 / 정지
+// ═══════════════════════════════════════
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -301,185 +369,155 @@ async function startCamera() {
     webcamVideo.srcObject = stream;
     await webcamVideo.play();
 
-    handCanvas.width  = webcamVideo.videoWidth  || 640;
-    handCanvas.height = webcamVideo.videoHeight || 480;
+    handCanvas.width  = 640;
+    handCanvas.height = 480;
 
-    mpCamera = new Camera(webcamVideo, {
-      onFrame: async () => {
-        await hands.send({ image: webcamVideo });
-      },
-      width:  640,
-      height: 480,
+    mpCam = new Camera(webcamVideo, {
+      onFrame: async () => { await handsDetector.send({ image: webcamVideo }); },
+      width: 640, height: 480,
     });
-    mpCamera.start();
+    mpCam.start();
 
     cameraActive = true;
-    setStatus('카메라 활성화 — 손을 보여주세요', 'ready');
+    camBtn.textContent = '📷 손 인식 끄기';
+    camBtn.classList.add('active');
+    setStatus('카메라 활성화', 'ready');
   } catch (err) {
     console.error(err);
-    setStatus('카메라 접근 권한 필요 ❌', 'error');
+    setStatus('카메라 권한 필요 ✕', 'error');
   }
 }
 
 function stopCamera() {
-  if (mpCamera) { mpCamera.stop(); mpCamera = null; }
-  if (webcamVideo.srcObject) {
-    webcamVideo.srcObject.getTracks().forEach(t => t.stop());
-    webcamVideo.srcObject = null;
-  }
+  mpCam?.stop(); mpCam = null;
+  webcamVideo.srcObject?.getTracks().forEach(t => t.stop());
+  webcamVideo.srcObject = null;
   handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
   cameraActive = false;
-  gestureDisplay.textContent = '카메라 꺼짐';
-  setStatus('카메라 꺼짐', '');
+  camBtn.textContent = '📷 손 인식 시작';
+  camBtn.classList.remove('active');
+  gState.type = 'none';
+  gestureBadge.classList.remove('show');
+  setStatus(stlMesh ? '로드 완료 ✓' : 'STL을 업로드하세요', stlMesh ? 'ready' : '');
 }
 
-// ═══════════════════════════════════════════════
-//  손 인식 콜백 → 3D 제어
-// ═══════════════════════════════════════════════
-const GESTURE_LABELS = {
-  none:  '인식 없음',
-  one:   '☝️ 1손가락 — 회전',
-  two:   '✌️ 2손가락 — 이동',
-  pinch: '🤏 핀치 — 확대/축소',
-  open:  '✋ 손 펼침 — 정지',
+// ═══════════════════════════════════════
+//  손 인식 결과 처리
+// ═══════════════════════════════════════
+const BADGE_MAP = {
+  one:      '☝️ 회전 중',
+  two:      '✌️ 이동 중',
+  thumb_up: '👍 확대 중',
+  pinky:    '🤙 축소 중',
+  open:     '✋ 정지',
+  none:     '손 감지됨',
 };
 
+const ZOOM_SPEED = 0.03;
+
 function onHandResults(results) {
-  // 캔버스 클리어 & 미러 반전 (셀카 방향)
   handCtx.save();
   handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+  // 좌우 미러
   handCtx.scale(-1, 1);
   handCtx.translate(-handCanvas.width, 0);
-
-  // 웹캠 이미지 그리기
   handCtx.drawImage(results.image, 0, 0, handCanvas.width, handCanvas.height);
 
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+  if (results.multiHandLandmarks?.length > 0) {
     const lm = results.multiHandLandmarks[0];
 
-    // 랜드마크 & 연결선 그리기
-    drawConnectors(handCtx, lm, HAND_CONNECTIONS, { color: '#00e5ff', lineWidth: 2 });
-    drawLandmarks(handCtx, lm, { color: '#ff4081', lineWidth: 1, radius: 4 });
+    drawConnectors(handCtx, lm, HAND_CONNECTIONS, { color: '#3b6ef8', lineWidth: 2 });
+    drawLandmarks(handCtx, lm, { color: '#f97316', lineWidth: 1, radius: 3 });
 
     handCtx.restore();
 
-    // 제스처 분류
-    const g = classifyGesture(lm);
-    gestureDisplay.textContent = GESTURE_LABELS[g] || g;
+    const g = classifyHand(lm);
 
-    if (!stlMesh) return; // 모델 없으면 제어 안 함
+    // 배지
+    if (g !== 'none') showBadge(BADGE_MAP[g] || g);
 
-    // 손목(0) 좌표 (0~1 정규화, 미러 보정)
+    if (!stlMesh) { gState.type = 'none'; return; }
+
+    // 손목(0) 미러 보정 x
     const wx = 1.0 - lm[0].x;
     const wy = lm[0].y;
 
     switch (g) {
-      // ── 회전 (검지 1개) ──
       case 'one': {
-        if (gesture.type === 'one') {
-          const dx = (wx - gesture.prevX) * 4.0;
-          const dy = (wy - gesture.prevY) * 4.0;
-          stlMesh.rotation.y += dx;
-          stlMesh.rotation.x += dy;
+        if (gState.type === 'one') {
+          stlMesh.rotation.y += (wx - gState.prevX) * 5.0;
+          stlMesh.rotation.x += (wy - gState.prevY) * 5.0;
         }
-        gesture.type  = 'one';
-        gesture.prevX = wx;
-        gesture.prevY = wy;
+        gState.type = 'one'; gState.prevX = wx; gState.prevY = wy;
         break;
       }
-
-      // ── 이동 (검지+중지) ──
       case 'two': {
-        if (gesture.type === 'two') {
-          const dx = (wx - gesture.prevX) *  6.0;
-          const dy = (wy - gesture.prevY) * -6.0; // y 반전
-          stlMesh.position.x += dx;
-          stlMesh.position.y += dy;
+        if (gState.type === 'two') {
+          stlMesh.position.x += (wx - gState.prevX) *  7.0;
+          stlMesh.position.y += (wy - gState.prevY) * -7.0;
         }
-        gesture.type  = 'two';
-        gesture.prevX = wx;
-        gesture.prevY = wy;
+        gState.type = 'two'; gState.prevX = wx; gState.prevY = wy;
         break;
       }
-
-      // ── 확대/축소 (핀치) ──
-      case 'pinch': {
-        // 엄지(4) ↔ 검지(8) 거리
-        const pd = dist2D(lm[4], lm[8]);
-        if (gesture.type === 'pinch') {
-          const delta = (pd - gesture.prevPinchDist) * 15.0;
-          const newZ  = camera.position.z - delta;
-          camera.position.z = Math.max(0.5, Math.min(20, newZ));
-        }
-        gesture.type          = 'pinch';
-        gesture.prevPinchDist = pd;
+      case 'thumb_up': {
+        camera.position.z = Math.max(0.5, camera.position.z - ZOOM_SPEED);
+        gState.type = 'thumb_up';
         break;
       }
-
-      // ── 정지 (손 펼침) ──
-      case 'open':
-        gesture.type = 'open';
+      case 'pinky': {
+        camera.position.z = Math.min(20, camera.position.z + ZOOM_SPEED);
+        gState.type = 'pinky';
         break;
-
-      default:
-        gesture.type = 'none';
+      }
+      case 'open': {
+        gState.type = 'open';
+        break;
+      }
+      default: {
+        gState.type = 'none';
+      }
     }
   } else {
-    // 손이 안 보임
     handCtx.restore();
-    gesture.type = 'none';
-    gestureDisplay.textContent = '손을 화면에 보여주세요';
+    gState.type = 'none';
   }
 }
 
-// ═══════════════════════════════════════════════
-//  이벤트 바인딩
-// ═══════════════════════════════════════════════
-fileInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.stl')) {
-    setStatus('STL 파일만 지원합니다 ❌', 'error');
-    return;
+// ═══════════════════════════════════════
+//  파일 이벤트
+// ═══════════════════════════════════════
+function readFile(file) {
+  if (!file?.name.toLowerCase().endsWith('.stl')) {
+    setStatus('STL 파일만 지원 ✕', 'error'); return;
   }
-  setStatus('파일 로딩 중…', 'warn');
-  const reader = new FileReader();
-  reader.onload = (ev) => loadSTL(ev.target.result);
-  reader.onerror = () => setStatus('파일 읽기 오류 ❌', 'error');
-  reader.readAsArrayBuffer(file);
-});
+  setStatus('로딩 중…', 'warn');
+  const r = new FileReader();
+  r.onload  = e => loadSTL(e.target.result);
+  r.onerror = () => setStatus('파일 읽기 오류 ✕', 'error');
+  r.readAsArrayBuffer(file);
+}
 
-// 드래그 앤 드롭
-const viewerEl = document.getElementById('viewer-container');
-viewerEl.addEventListener('dragover', (e) => {
+fileInput.addEventListener('change', e => readFile(e.target.files[0]));
+
+const viewerWrap = document.getElementById('viewer-wrap');
+viewerWrap.addEventListener('dragover',  e => { e.preventDefault(); document.body.classList.add('dragging'); });
+viewerWrap.addEventListener('dragleave', ()  => document.body.classList.remove('dragging'));
+viewerWrap.addEventListener('drop', e => {
   e.preventDefault();
-  document.body.classList.add('drag-over');
-});
-viewerEl.addEventListener('dragleave', () => document.body.classList.remove('drag-over'));
-viewerEl.addEventListener('drop', (e) => {
-  e.preventDefault();
-  document.body.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file && file.name.toLowerCase().endsWith('.stl')) {
-    const reader = new FileReader();
-    reader.onload = (ev) => loadSTL(ev.target.result);
-    reader.readAsArrayBuffer(file);
-  }
+  document.body.classList.remove('dragging');
+  readFile(e.dataTransfer.files[0]);
 });
 
-camBtn.addEventListener('click', () => {
-  if (cameraActive) stopCamera();
-  else startCamera();
-});
-
+camBtn.addEventListener('click', () => cameraActive ? stopCamera() : startCamera());
 resetBtn.addEventListener('click', resetView);
 
-// ═══════════════════════════════════════════════
-//  앱 부트스트랩
-// ═══════════════════════════════════════════════
-window.addEventListener('load', async () => {
+// ═══════════════════════════════════════
+//  부트스트랩
+// ═══════════════════════════════════════
+window.addEventListener('load', () => {
   initThree();
   initMediaPipe();
+  initButtonControls();
   loadingEl.classList.add('hidden');
-  setStatus('STL 파일을 업로드하세요');
+  setStatus('STL을 업로드하세요');
 });
