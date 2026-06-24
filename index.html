@@ -3,227 +3,324 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hand Gesture STL Viewer</title>
+  <title>STL Gesture Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #f5f6fa;
+      --surface:   #ffffff;
+      --border:    #e3e6ef;
+      --text:      #1a1d2e;
+      --muted:     #7b8099;
+      --accent:    #3b6ef8;
+      --accent-lt: #eef2ff;
+      --green:     #22c55e;
+      --orange:    #f97316;
+      --red:       #ef4444;
+      --radius:    12px;
+      --shadow:    0 2px 12px rgba(0,0,0,.08);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,.12);
+    }
 
     body {
-      background: #0d0d0d;
-      color: #e0e0e0;
-      font-family: 'Segoe UI', sans-serif;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      width: 100vw;
       overflow: hidden;
-      height: 100vh;
-      width: 100vw;
-    }
-
-    #app {
       display: flex;
-      height: 100vh;
-      width: 100vw;
+      flex-direction: column;
     }
 
-    /* ── 3D 뷰어 영역 ── */
-    #viewer-container {
+    /* ── 헤더 ── */
+    header {
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 12px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    header .logo {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+    }
+    header .logo span { color: var(--text); }
+    header .sep {
+      width: 1px; height: 20px;
+      background: var(--border);
+      margin: 0 4px;
+    }
+    header .tagline {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    header .spacer { flex: 1; }
+    #status-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: var(--bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      transition: all .2s;
+    }
+    #status-pill.ready  { background: #f0fdf4; color: var(--green);  border-color: #bbf7d0; }
+    #status-pill.warn   { background: #fff7ed; color: var(--orange); border-color: #fed7aa; }
+    #status-pill.error  { background: #fef2f2; color: var(--red);    border-color: #fecaca; }
+
+    /* ── 메인 레이아웃 ── */
+    main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ── 3D 뷰어 ── */
+    #viewer-wrap {
       flex: 1;
       position: relative;
+      background: #f0f2f8;
+      overflow: hidden;
     }
-
     #three-canvas {
       display: block;
       width: 100%;
       height: 100%;
+      cursor: grab;
     }
+    #three-canvas:active { cursor: grabbing; }
 
-    /* ── 웹캠 오버레이 ── */
-    #webcam-wrapper {
+    /* 드래그 오버 */
+    #drop-hint {
       position: absolute;
-      bottom: 20px;
-      right: 20px;
-      width: 240px;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 2px solid #333;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.6);
-      background: #111;
-    }
-
-    #webcam-wrapper video,
-    #webcam-wrapper canvas {
-      display: block;
-      width: 100%;
-      height: auto;
-    }
-
-    #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
-    #hand-canvas  { position: relative; z-index: 2; }
-
-    /* ── UI 패널 ── */
-    #ui-panel {
-      width: 260px;
-      background: #161616;
-      border-left: 1px solid #2a2a2a;
+      inset: 0;
       display: flex;
       flex-direction: column;
-      padding: 20px 16px;
-      gap: 20px;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity .3s;
+    }
+    #drop-hint.hidden { opacity: 0; }
+    #drop-hint .icon { font-size: 48px; }
+    #drop-hint p { font-size: 14px; color: var(--muted); font-weight: 500; }
+    #drop-hint small { font-size: 12px; color: #b0b6cc; }
+
+    body.dragging #viewer-wrap { outline: 3px dashed var(--accent); outline-offset: -6px; }
+    body.dragging #drop-hint { opacity: 1 !important; }
+
+    /* 웹캠 PiP */
+    #pip {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      width: 200px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      box-shadow: var(--shadow-lg);
+      background: #111;
+    }
+    #pip video  { position: absolute; opacity: 0; pointer-events: none; }
+    #pip canvas { display: block; width: 100%; }
+
+    /* 현재 제스처 배지 */
+    #gesture-badge {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      box-shadow: var(--shadow);
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .3s;
+    }
+    #gesture-badge.show { opacity: 1; }
+
+    /* ── 오른쪽 패널 ── */
+    #panel {
+      width: 272px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
       overflow-y: auto;
+      flex-shrink: 0;
     }
 
-    #ui-panel h1 {
-      font-size: 15px;
+    .panel-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-section:last-child { border-bottom: none; }
+
+    .section-label {
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: .08em;
       text-transform: uppercase;
-      color: #fff;
-      border-bottom: 1px solid #2a2a2a;
-      padding-bottom: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
     }
 
-    /* 파일 업로드 */
-    #upload-btn {
-      display: block;
+    /* 업로드 */
+    #upload-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       width: 100%;
       padding: 10px 0;
-      background: #1e90ff;
+      background: var(--accent);
       color: #fff;
-      border: none;
       border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      text-align: center;
-      transition: background 0.2s;
+      transition: background .15s;
+      border: none;
     }
-    #upload-btn:hover { background: #1070cc; }
+    #upload-label:hover { background: #2f5ee0; }
     #file-input { display: none; }
 
-    /* 상태 뱃지 */
-    #status-badge {
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 6px;
-      background: #222;
-      color: #888;
-      text-align: center;
-      min-height: 28px;
+    /* 버튼 컨트롤 그리드 */
+    .ctrl-grid {
+      display: grid;
+      gap: 6px;
     }
-    #status-badge.ready  { background: #0f2e0f; color: #4caf50; }
-    #status-badge.warn   { background: #2e1a0f; color: #ff9800; }
-    #status-badge.error  { background: #2e0f0f; color: #f44336; }
-
-    /* 제스처 가이드 */
-    .guide-section h2 {
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #555;
-      margin-bottom: 10px;
-    }
-
-    .gesture-item {
+    .ctrl-row {
       display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 6px;
     }
-
-    .gesture-icon {
-      font-size: 22px;
-      min-width: 32px;
-      text-align: center;
-      line-height: 1.2;
-    }
-
-    .gesture-desc {
-      font-size: 12px;
-      color: #aaa;
-      line-height: 1.5;
-    }
-
-    .gesture-desc strong {
-      display: block;
-      color: #ddd;
-      font-size: 12px;
-      margin-bottom: 2px;
-    }
-
-    /* 현재 제스처 표시 */
-    #current-gesture {
-      background: #1a1a1a;
+    .ctrl-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 10px 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 13px;
-      color: #1e90ff;
-      font-weight: 600;
-      text-align: center;
-      min-height: 36px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+      transition: all .15s;
+      user-select: none;
     }
+    .ctrl-btn:hover { background: var(--accent-lt); border-color: var(--accent); color: var(--accent); }
+    .ctrl-btn:active { transform: scale(.96); }
+    .ctrl-btn .ci { font-size: 18px; }
 
     /* 카메라 토글 */
     #cam-btn {
       width: 100%;
       padding: 9px 0;
-      background: #222;
-      color: #ccc;
-      border: 1px solid #333;
+      background: var(--bg);
+      border: 1px solid var(--border);
       border-radius: 8px;
+      font-family: inherit;
       font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
-    #cam-btn:hover { background: #2a2a2a; }
+    #cam-btn:hover { background: var(--accent-lt); border-color: var(--accent); color: var(--accent); }
+    #cam-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-    /* 리셋 버튼 */
+    /* 리셋 */
     #reset-btn {
       width: 100%;
       padding: 9px 0;
-      background: #222;
-      color: #ccc;
-      border: 1px solid #333;
+      background: var(--bg);
+      border: 1px solid var(--border);
       border-radius: 8px;
+      font-family: inherit;
       font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all .15s;
     }
-    #reset-btn:hover { background: #2a2a2a; }
+    #reset-btn:hover { background: #fef2f2; border-color: #fecaca; color: var(--red); }
 
-    /* 로딩 오버레이 */
-    #loading {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.85);
+    /* 제스처 가이드 */
+    .gesture-list { display: flex; flex-direction: column; gap: 8px; }
+    .g-item {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      z-index: 100;
-      gap: 16px;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .g-item .gi { font-size: 20px; min-width: 28px; text-align: center; }
+    .g-item .gt { font-size: 12px; }
+    .g-item .gt strong { display: block; font-weight: 600; color: var(--text); font-size: 11px; }
+    .g-item .gt span { color: var(--muted); font-size: 11px; }
+
+    /* 로딩 */
+    #loading {
+      position: fixed; inset: 0;
+      background: rgba(255,255,255,.92);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; z-index: 200;
     }
     #loading.hidden { display: none; }
-    #loading p { font-size: 14px; color: #aaa; }
+    #loading p { font-size: 13px; color: var(--muted); font-weight: 500; }
     .spinner {
-      width: 40px; height: 40px;
-      border: 3px solid #333;
-      border-top-color: #1e90ff;
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: spin .7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* 드래그 앤 드롭 하이라이트 */
-    body.drag-over #viewer-container::after {
-      content: 'STL 파일을 여기에 놓으세요';
+    /* 마우스 조작 힌트 */
+    #mouse-hint {
       position: absolute;
-      inset: 0;
-      background: rgba(30,144,255,0.15);
-      border: 3px dashed #1e90ff;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      color: #1e90ff;
-      z-index: 50;
+      bottom: 16px;
+      left: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.7;
+      box-shadow: var(--shadow);
+      pointer-events: none;
     }
   </style>
 </head>
@@ -231,91 +328,167 @@
 
 <div id="loading">
   <div class="spinner"></div>
-  <p>라이브러리 로딩 중…</p>
+  <p>라이브러리 초기화 중…</p>
 </div>
 
-<div id="app">
+<!-- 헤더 -->
+<header>
+  <div class="logo">✦ STL<span>Gesture</span></div>
+  <div class="sep"></div>
+  <div class="tagline">손 제스처로 3D 모델 조작</div>
+  <div class="spacer"></div>
+  <div id="status-pill">준비 중</div>
+</header>
+
+<!-- 메인 -->
+<main>
   <!-- 3D 뷰어 -->
-  <div id="viewer-container">
+  <div id="viewer-wrap">
     <canvas id="three-canvas"></canvas>
 
-    <!-- 웹캠 오버레이 -->
-    <div id="webcam-wrapper">
+    <!-- 빈 화면 안내 -->
+    <div id="drop-hint">
+      <div class="icon">📦</div>
+      <p>STL 파일을 드래그하거나 업로드하세요</p>
+      <small>Binary / ASCII STL 모두 지원</small>
+    </div>
+
+    <!-- 제스처 배지 -->
+    <div id="gesture-badge">대기 중</div>
+
+    <!-- 마우스 힌트 -->
+    <div id="mouse-hint">
+      🖱 드래그: 회전 &nbsp;|&nbsp; Shift+드래그: 이동 &nbsp;|&nbsp; 휠: 줌
+    </div>
+
+    <!-- 웹캠 PiP -->
+    <div id="pip">
       <video id="webcam-video" autoplay playsinline muted></video>
       <canvas id="hand-canvas"></canvas>
     </div>
   </div>
 
-  <!-- 사이드 패널 -->
-  <div id="ui-panel">
-    <h1>✋ STL Gesture Viewer</h1>
+  <!-- 오른쪽 패널 -->
+  <div id="panel">
 
     <!-- 파일 업로드 -->
-    <div>
+    <div class="panel-section">
+      <div class="section-label">파일</div>
       <input type="file" id="file-input" accept=".stl" />
-      <label for="file-input" id="upload-btn">📂 STL 파일 업로드</label>
+      <label for="file-input" id="upload-label">
+        <span>📂</span> STL 파일 업로드
+      </label>
     </div>
 
-    <div id="status-badge">STL 파일을 업로드하세요</div>
+    <!-- 버튼 컨트롤 -->
+    <div class="panel-section">
+      <div class="section-label">버튼 조작</div>
+      <div class="ctrl-grid">
+        <!-- 회전 -->
+        <div class="ctrl-row">
+          <button class="ctrl-btn" id="btn-rot-left">
+            <span class="ci">↺</span>왼쪽 회전
+          </button>
+          <button class="ctrl-btn" id="btn-rot-right">
+            <span class="ci">↻</span>오른쪽 회전
+          </button>
+        </div>
+        <div class="ctrl-row">
+          <button class="ctrl-btn" id="btn-rot-up">
+            <span class="ci">↑</span>위 회전
+          </button>
+          <button class="ctrl-btn" id="btn-rot-down">
+            <span class="ci">↓</span>아래 회전
+          </button>
+        </div>
+        <!-- 이동 -->
+        <div class="ctrl-row">
+          <button class="ctrl-btn" id="btn-move-left">
+            <span class="ci">⬅</span>왼쪽
+          </button>
+          <button class="ctrl-btn" id="btn-move-right">
+            <span class="ci">➡</span>오른쪽
+          </button>
+          <button class="ctrl-btn" id="btn-move-up">
+            <span class="ci">⬆</span>위
+          </button>
+          <button class="ctrl-btn" id="btn-move-down">
+            <span class="ci">⬇</span>아래
+          </button>
+        </div>
+        <!-- 줌 -->
+        <div class="ctrl-row">
+          <button class="ctrl-btn" id="btn-zoom-in">
+            <span class="ci">🔍+</span>확대
+          </button>
+          <button class="ctrl-btn" id="btn-zoom-out">
+            <span class="ci">🔍−</span>축소
+          </button>
+        </div>
+      </div>
+    </div>
 
-    <!-- 현재 제스처 -->
-    <div class="guide-section">
-      <h2>현재 감지</h2>
-      <div id="current-gesture">대기 중…</div>
+    <!-- 카메라 & 리셋 -->
+    <div class="panel-section">
+      <div class="section-label">카메라</div>
+      <button id="cam-btn">📷 손 인식 시작</button>
+    </div>
+    <div class="panel-section">
+      <button id="reset-btn">🔄 뷰 초기화</button>
     </div>
 
     <!-- 제스처 가이드 -->
-    <div class="guide-section">
-      <h2>제스처 가이드</h2>
-
-      <div class="gesture-item">
-        <div class="gesture-icon">☝️</div>
-        <div class="gesture-desc">
-          <strong>검지 1개 — 회전</strong>
-          손가락 하나로 움직여 3D 모델을 회전
+    <div class="panel-section">
+      <div class="section-label">손 제스처 가이드</div>
+      <div class="gesture-list">
+        <div class="g-item">
+          <span class="gi">☝️</span>
+          <div class="gt">
+            <strong>검지 1개</strong>
+            <span>손목 움직임 → 회전</span>
+          </div>
         </div>
-      </div>
-
-      <div class="gesture-item">
-        <div class="gesture-icon">✌️</div>
-        <div class="gesture-desc">
-          <strong>검지+중지 — 이동</strong>
-          두 손가락으로 모델 위치 이동
+        <div class="g-item">
+          <span class="gi">✌️</span>
+          <div class="gt">
+            <strong>검지 + 중지</strong>
+            <span>손목 움직임 → 이동</span>
+          </div>
         </div>
-      </div>
-
-      <div class="gesture-item">
-        <div class="gesture-icon">🤏</div>
-        <div class="gesture-desc">
-          <strong>엄지+검지 핀치 — 확대/축소</strong>
-          손가락 간격으로 줌 인/아웃
+        <div class="g-item">
+          <span class="gi">👍</span>
+          <div class="gt">
+            <strong>엄지만 위로</strong>
+            <span>유지 → 확대</span>
+          </div>
         </div>
-      </div>
-
-      <div class="gesture-item">
-        <div class="gesture-icon">✋</div>
-        <div class="gesture-desc">
-          <strong>손 펼치기 — 정지</strong>
-          모든 동작을 일시 중지
+        <div class="g-item">
+          <span class="gi">🤙</span>
+          <div class="gt">
+            <strong>엄지+새끼만</strong>
+            <span>유지 → 축소</span>
+          </div>
+        </div>
+        <div class="g-item">
+          <span class="gi">✋</span>
+          <div class="gt">
+            <strong>손 펼침 (4개+)</strong>
+            <span>정지</span>
+          </div>
         </div>
       </div>
     </div>
 
-    <button id="cam-btn">📷 카메라 켜기/끄기</button>
-    <button id="reset-btn">🔄 뷰 초기화</button>
   </div>
-</div>
+</main>
 
-<!-- Three.js CDN -->
+<!-- Three.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
-<!-- MediaPipe Hands -->
+<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
-<!-- 앱 로직 -->
 <script src="main.js"></script>
 </body>
 </html>
