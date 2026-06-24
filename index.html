@@ -12,7 +12,7 @@
       background: #f8f9fa;
       color: #212529;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      overflow: hidden; /* 스크롤바를 완전히 제거 */
+      overflow: hidden; /* 전체 페이지 스크롤 삭제 */
       height: 100vh;
       width: 100vw;
     }
@@ -59,17 +59,17 @@
     #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
     #hand-canvas  { position: relative; z-index: 2; transform: scaleX(-1); }
 
-    /* ── 우측 통합 컨트롤 패널 ── */
+    /* ── 우측 통합 컨트롤 패널 (스마트 유연 레이아웃) ── */
     #ui-panel {
       width: 340px;
       background: #ffffff;
       border-left: 1px solid #e9ecef;
       display: flex;
       flex-direction: column;
-      padding: 24px 20px;
-      gap: 18px;
+      padding: 20px 16px; /* 여백을 살짝 줄여 공간 확보 */
+      gap: 14px;          /* 간격을 촘촘하게 최적화 */
       height: 100vh;
-      overflow: hidden; /* 패널 내부 스크롤도 잠금 처리 */
+      overflow: hidden;   /* 외부 스크롤 완벽 차단 */
       box-shadow: -4px 0 24px rgba(0,0,0,0.02);
     }
 
@@ -86,43 +86,61 @@
       color: #868e96;
     }
 
-    /* 파일 업로드 스타일 */
-    #upload-label {
+    /* ⭐ [UI/UX 핵심 수정] 화면이 작아지면 모션 가이드 영역만 압축 및 내부 스크롤 발생 */
+    .guide-box {
+      background: #fdfdfd;
+      border: 1px solid #e9ecef;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+      flex: 1;               /* 남는 모든 수직 공간을 채우도록 유연하게 설정 */
+      min-height: 160px;     /* 최소 크기 보장 */
+      overflow-y: auto;      /* 내용이 넘치면 이 박스 안에서만 스크롤바 생성 */
+    }
+
+    /* 스크롤바 디자인 슬림화 */
+    .guide-box::-webkit-scrollbar { width: 4px; }
+    .guide-box::-webkit-scrollbar-thumb { background: #dee2e6; border-radius: 2px; }
+
+    .gesture-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .gesture-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border: 1px solid #f1f3f5;
+    }
+
+    .gesture-icon {
+      font-size: 16px;
+      background: #ffffff;
+      width: 28px;
+      height: 28px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 12px;
-      background: #4dabf7;
-      color: #ffffff;
-      border-radius: 12px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 12px rgba(77, 171, 247, 0.25);
+      border-radius: 6px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
     }
-    #upload-label:hover { 
-      background: #339af0;
-      box-shadow: 0 6px 16px rgba(51, 154, 240, 0.35);
-    }
-    #file-input { display: none; }
 
-    /* 상태 표시 배지 */
-    #status-badge {
+    .gesture-desc strong {
+      display: block;
+      color: #343a40;
       font-size: 11px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: #f1f3f5;
-      color: #495057;
-      text-align: center;
-      font-weight: 500;
-      border: 1px solid #e9ecef;
+      font-weight: 700;
     }
-    #status-badge.ready  { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
-    #status-badge.warn   { background: #fff9db; color: #f08c00; border-color: #fff3bf; }
-    #status-badge.error  { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
+    
+    .gesture-desc p {
+      font-size: 10px;
+      color: #868e96;
+    }
 
     .section-title {
       font-size: 11px;
@@ -130,7 +148,7 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #adb5bd;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     /* 현재 인식 상태 박스 */
@@ -138,8 +156,8 @@
       background: #f8f9fa;
       border: 1px solid #e9ecef;
       border-radius: 10px;
-      padding: 10px;
-      font-size: 13px;
+      padding: 8px;
+      font-size: 12px;
       color: #228be6;
       font-weight: 700;
       text-align: center;
@@ -149,7 +167,7 @@
     .control-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 6px;
+      gap: 5px;
     }
     
     .btn-ctrl {
@@ -167,54 +185,49 @@
     .btn-primary-action { background: #343a40; color: #ffffff; border-color: #343a40; }
     .btn-primary-action:hover { background: #212529; color: #ffffff; }
 
-    /* ⭐ [UI/UX 대규모 개선] 모션 가이드를 최상단급 상시 노출 영역으로 변경 */
-    .guide-box {
-      background: #fdfdfd;
-      border: 1px solid #e9ecef;
-      border-radius: 12px;
-      padding: 14px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.02);
-    }
-
-    .gesture-list {
+    /* 맨 아래 파일 업로드 버튼 (절대 잘리지 않고 항상 하단 고정) */
+    .footer-action {
+      margin-top: auto; /* 상단 요소들이 밀어내도 항상 가장 아래에 고정 */
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
-    .gesture-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      border: 1px solid #f1f3f5;
-    }
-
-    .gesture-icon {
-      font-size: 18px;
-      background: #ffffff;
-      width: 32px;
-      height: 32px;
+    #upload-label {
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 6px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+      gap: 8px;
+      width: 100%;
+      padding: 11px;
+      background: #4dabf7;
+      color: #ffffff;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(77, 171, 247, 0.25);
     }
+    #upload-label:hover { 
+      background: #339af0;
+      box-shadow: 0 6px 16px rgba(51, 154, 240, 0.35);
+    }
+    #file-input { display: none; }
 
-    .gesture-desc strong {
-      display: block;
-      color: #343a40;
-      font-size: 12px;
-      font-weight: 700;
+    #status-badge {
+      font-size: 11px;
+      padding: 7px;
+      border-radius: 8px;
+      background: #f1f3f5;
+      color: #495057;
+      text-align: center;
+      font-weight: 500;
+      border: 1px solid #e9ecef;
     }
-    
-    .gesture-desc p {
-      font-size: 10px;
-      color: #868e96;
-    }
+    #status-badge.ready  { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
+    #status-badge.warn   { background: #fff9db; color: #f08c00; border-color: #fff3bf; }
+    #status-badge.error  { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
 
     /* 로딩 오버레이 */
     #loading {
@@ -280,13 +293,13 @@
     </div>
 
     <div class="guide-box">
-      <div class="section-title" style="margin-bottom: 8px; color: #4dabf7;">실시간 모션 가이드 맵</div>
+      <div class="section-title" style="margin-bottom: 6px; color: #4dabf7;">실시간 모션 가이드 맵</div>
       <div class="gesture-list">
         <div class="gesture-item">
           <div class="gesture-icon">☝️</div>
           <div class="gesture-desc">
-            <strong>검지 1개 세우기 (타 손가락 접기)</strong>
-            <p>모델 3D 정밀 자유 회전 (손떨림 방지 보정)</p>
+            <strong>검지 1개 세우기</strong>
+            <p>모델 3D 정밀 방향 축 고정 회전</p>
           </div>
         </div>
         <div class="gesture-item">
@@ -331,10 +344,10 @@
       </div>
     </div>
 
-    <div style="margin-top: auto;">
+    <div class="footer-action">
       <input type="file" id="file-input" accept=".stl" />
       <label for="file-input" id="upload-label">📂 STL 3D 모델 불러오기</label>
-      <div id="status-badge" style="margin-top: 8px;">대기 중 — 데이터를 추가하세요</div>
+      <div id="status-badge">대기 중 — 데이터를 추가하세요</div>
     </div>
   </div>
 </div>
