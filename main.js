@@ -2,7 +2,7 @@
 
 // ── GLOBAL VARIABLES & STATES ──
 let scene, camera, renderer, stlMesh;
-let hands, mpCamera;
+let hands, mpCamera; 
 let cameraActive = false;
 
 // DOM Caching
