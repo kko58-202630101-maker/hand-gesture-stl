@@ -1,8 +1,5 @@
 'use strict';
 
-// ═══════════════════════════════════════════════
-//  GLOBAL STATE MANAGEMENT
-// ═══════════════════════════════════════════════
 let scene, camera, renderer, stlMesh;
 let hands, mpCamera;
 let cameraActive = false;
@@ -18,23 +15,20 @@ const webcamVideo    = document.getElementById('webcam-video');
 const handCanvas     = document.getElementById('hand-canvas');
 const handCtx        = handCanvas.getContext('2d');
 
-// 하이브리드 인터페이스 컴포넌트 버튼 목록
 const btnZoomIn   = document.getElementById('btn-zoom-in');
 const btnZoomOut  = document.getElementById('btn-zoom-out');
 const btnRotLeft  = document.getElementById('btn-rot-left');
 const btnRotRight = document.getElementById('btn-rot-right');
 const btnDemo     = document.getElementById('btn-demo');
 
-// 시각 동기화 모션 트래킹 프레임 데이터 구조체
+// 시각 동기화 트래킹 프레임 데이터 구조체
 const trackingFrame = {
   activeGesture: 'none',
   lastAnchorX: 0,
   lastAnchorY: 0
 };
 
-// ═══════════════════════════════════════════════
-//  3D 그래픽스 그래디언트 엔진 초기화
-// ═══════════════════════════════════════════════
+// ── 3D 그래픽스 엔진 초기화 ──
 function initThreeEngine() {
   const container = document.getElementById('viewer-container');
   const canvas    = document.getElementById('three-canvas');
@@ -50,7 +44,7 @@ function initThreeEngine() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.2;
 
-  // 조명 아키텍처 스튜디오 등급 셋업 (금속성 및 형태감 강조)
+  // 조명 설정
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambientLight);
 
@@ -62,10 +56,8 @@ function initThreeEngine() {
   fillLight.position.set(-4, -2, -3);
   scene.add(fillLight);
 
-  // 미니멀 그리드 구조체 매핑
   const gridSystem = new THREE.GridHelper(20, 40, 0xadb5bd, 0xe9ecef);
   gridSystem.position.y = -1.5;
-  gridSystem.name = 'studioGrid';
   scene.add(gridSystem);
 
   window.addEventListener('resize', () => {
@@ -74,26 +66,20 @@ function initThreeEngine() {
     renderer.setSize(container.clientWidth, container.clientHeight);
   });
 
-  // 실시간 60FPS 렌더링 프레임 서클 루프
+  // 실시간 렌더링 루프
   function renderTick() {
     requestAnimationFrame(renderTick);
     
-    // 오토 브라우징 무브먼트 (유휴 상태인 경우 부드럽게 자체 회전)
-    if (stlMesh && trackingFrame.activeGesture === 'none') {
-      stlMesh.rotation.y += 0.002;
-    }
+    // ⭐ [수정 완료] 가만히 있을 때 혼자 돌던 자동 회전 코드 제거!
     
     renderer.render(scene, camera);
   }
   renderTick();
 }
 
-// ═══════════════════════════════════════════════
-//  STL 버퍼 디코딩 고속 파서 모듈 (인라인)
-// ═══════════════════════════════════════════════
+// ── STL 파서 및 인스턴싱 ──
 function parseStlBinaryOrAscii(arrayBuffer) {
   const uint8View = new Uint8Array(arrayBuffer);
-  
   const isAsciiFormat = () => {
     const sampleText = new TextDecoder().decode(uint8View.slice(0, 128));
     return sampleText.trim().startsWith('solid');
@@ -146,9 +132,6 @@ function parseStlBinaryOrAscii(arrayBuffer) {
   return geometry;
 }
 
-// ═══════════════════════════════════════════════
-//  3D 객체 인스턴싱 및 레이아웃 자동 빌드
-// ═══════════════════════════════════════════════
 function renderStlToScene(buffer) {
   try {
     const geometry = parseStlBinaryOrAscii(buffer);
@@ -170,7 +153,6 @@ function renderStlToScene(buffer) {
     const maxDimension = Math.max(sizeVector.x, sizeVector.y, sizeVector.z);
     const dynamicScale = 3.5 / maxDimension;
 
-    // 모던 인더스트리얼 오브젝트 질감 구현
     const premiumMaterial = new THREE.MeshStandardMaterial({
       color: 0x4dabf7,
       metalness: 0.2,
@@ -191,9 +173,7 @@ function renderStlToScene(buffer) {
   }
 }
 
-// ═══════════════════════════════════════════════
-//  하이브리드 인터페이스 버튼 컨트롤러 맵셋
-// ═══════════════════════════════════════════════
+// ── 인터페이스 동기화 및 뷰포트 초기화 ──
 function resetCameraViewport() {
   camera.position.set(0, 0, 6);
   camera.lookAt(0, 0, 0);
@@ -204,7 +184,6 @@ function resetCameraViewport() {
   updateUiStatus('뷰포트 정렬 초기화 스캔', 'ready');
 }
 
-// 수동 온스크린 버튼 인터랙션 리스너 바인딩
 btnZoomIn.addEventListener('click', () => { camera.position.z = Math.max(1, camera.position.z - 0.5); });
 btnZoomOut.addEventListener('click', () => { camera.position.z = Math.min(25, camera.position.z + 0.5); });
 btnRotLeft.addEventListener('click', () => { if (stlMesh) stlMesh.rotation.z -= 0.2; });
@@ -213,24 +192,22 @@ btnRotRight.addEventListener('click', () => { if (stlMesh) stlMesh.rotation.z +=
 btnDemo.addEventListener('click', () => {
   const mockGeometry = new THREE.BoxGeometry(2, 2, 2);
   const mockMaterial = new THREE.MeshStandardMaterial({ color: 0xff922b, metalness: 0.4, roughness: 0.2 });
-  
   if (stlMesh) scene.remove(stlMesh);
-  
   stlMesh = new THREE.Mesh(mockGeometry, mockMaterial);
   scene.add(stlMesh);
   resetCameraViewport();
   updateUiStatus('샘플 프리셋 빌드 로드 완료', 'ready');
 });
 
-// ═══════════════════════════════════════════════
-//  모션 캡처 및 제스처 분류 커널 개정
-// ═══════════════════════════════════════════════
+// ── 손가락 상태 체크 헬퍼 ──
 function checkFingerState(landmarks, tipIndex, dipIndex) {
   return landmarks[tipIndex].y < landmarks[dipIndex].y;
 }
 
+// ⭐ [알고리즘 개정] 모션 인식의 조건 강화 및 의도치 않은 회전 예방
 function processGestureParsing(landmarks) {
-  const thumbState  = landmarks[4].x < landmarks[3].x; // 셀카 미러 감안
+  // 각 손가락이 위로 명확히 펴졌는지 판별
+  const thumbState  = landmarks[4].x < landmarks[3].x; 
   const indexState  = checkFingerState(landmarks, 8, 6);
   const middleState = checkFingerState(landmarks, 12, 10);
   const ringState   = checkFingerState(landmarks, 16, 14);
@@ -238,26 +215,23 @@ function processGestureParsing(landmarks) {
 
   const activeFingersCount = [thumbState, indexState, middleState, ringState, pinkyState].filter(Boolean).length;
 
-  // 확대/축소 오작동 개선 필터 스키마 적용
-  if (activeFingersCount === 0) {
-    return 'zoom_out'; // 주먹 ✊ = 연속 후퇴 멀어짐
-  }
-  if (activeFingersCount >= 4) {
-    return 'zoom_in';  // 보자기 🖐️ = 연속 전진 확대됨
-  }
-  if (indexState && middleState && !ringState) {
-    return 'pan';      // 브이 ✌️ = 상하좌우 중심축 이동
-  }
-  if (indexState && !middleState) {
-    return 'rotate';   // 검지 ☝️ = 회전 제어
-  }
+  // 1. 🖐️ 보자기 (대부분 펼침) -> 확대
+  if (activeFingersCount >= 4) return 'zoom_in';
+  
+  // 2. ✊ 주먹 (전부 구부림) -> 축소
+  if (activeFingersCount === 0) return 'zoom_out';
+  
+  // 3. ✌️ 브이 (검지, 중지만 펴짐) -> 시선 평면 이동
+  if (indexState && middleState && !ringState && !pinkyState) return 'pan';
+  
+  // 4. ☝️ 검지 하나 (오직 검지만 펼쳐져 있고 타 손가락이 완전히 접혔을 때만 회전 인정)
+  if (indexState && !middleState && !ringState && !pinkyState) return 'rotate';
 
+  // 위 조건에 명확하게 맞아떨어지지 않는 애매한 손동작은 무조건 조작 무시(안정 상태유지)
   return 'none';
 }
 
-// ═══════════════════════════════════════════════
-//  MEDIAPIPE PIPELINE HANDLER
-// ═══════════════════════════════════════════════
+// ── MEDIAPIPE PIPELINE HANDLER ──
 function onCaptureResultHandler(results) {
   handCtx.save();
   handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
@@ -271,7 +245,7 @@ function onCaptureResultHandler(results) {
     const computedGesture = processGestureParsing(singleHandPoints);
     
     const uiLabels = {
-      none: '센서 유휴 상태',
+      none: '안정화 대기 모드 (정지)',
       rotate: '☝️ 궤도 회전 제어 중',
       pan: '✌️ 평면 초점 이동 중',
       zoom_in: '🖐️ 초점 전진 (Zoom In)',
@@ -281,24 +255,27 @@ function onCaptureResultHandler(results) {
     gestureDisplay.textContent = uiLabels[computedGesture] || '추적 불능';
 
     if (stlMesh) {
+      // 손가락 끝 대신 왜곡이 최소화되는 '손바닥 중앙(9번 마디)'을 제어 기준점으로 세팅
       const currentX = singleHandPoints[9].x;
       const currentY = singleHandPoints[9].y;
 
       switch (computedGesture) {
         case 'rotate':
           if (trackingFrame.activeGesture === 'rotate') {
-            const deltaX = (currentX - trackingFrame.lastAnchorX) * 4.5;
-            const deltaY = (currentY - trackingFrame.lastAnchorY) * 4.5;
-            stlMesh.rotation.y += deltaX;
-            stlMesh.rotation.x += deltaY;
+            const deltaX = (currentX - trackingFrame.lastAnchorX) * 5.0;
+            const deltaY = (currentY - trackingFrame.lastAnchorY) * 5.0;
+            
+            // 미세 손떨림 무시용 데드존 필터 스크리닝
+            if (Math.abs(deltaX) > 0.005) stlMesh.rotation.y += deltaX;
+            if (Math.abs(deltaY) > 0.005) stlMesh.rotation.x += deltaY;
           }
           break;
         case 'pan':
           if (trackingFrame.activeGesture === 'pan') {
-            const deltaX = (currentX - trackingFrame.lastAnchorX) * 5.0;
-            const deltaY = (currentY - trackingFrame.lastAnchorY) * -5.0;
-            stlMesh.position.x -= deltaX;
-            stlMesh.position.y -= deltaY;
+            const deltaX = (currentX - trackingFrame.lastAnchorX) * 5.5;
+            const deltaY = (currentY - trackingFrame.lastAnchorY) * -5.5;
+            if (Math.abs(deltaX) > 0.005) stlMesh.position.x -= deltaX;
+            if (Math.abs(deltaY) > 0.005) stlMesh.position.y -= deltaY;
           }
           break;
         case 'zoom_in':
@@ -309,6 +286,7 @@ function onCaptureResultHandler(results) {
           break;
       }
 
+      // 현재 추적 좌표 백업 업데이트
       trackingFrame.activeGesture = computedGesture;
       trackingFrame.lastAnchorX = currentX;
       trackingFrame.lastAnchorY = currentY;
@@ -320,9 +298,7 @@ function onCaptureResultHandler(results) {
   handCtx.restore();
 }
 
-// ═══════════════════════════════════════════════
-//  CAMERA VISION CONTEXT
-// ═══════════════════════════════════════════════
+// ── CAMERA VISION CONTROL ──
 async function bootCameraVision() {
   try {
     const videoStream = await navigator.mediaDevices.getUserMedia({
@@ -360,9 +336,6 @@ function terminateCameraVision() {
   updateUiStatus('분석 카메라 정지 상태', '');
 }
 
-// ═══════════════════════════════════════════════
-//  UI DATA PIPELINE BINDING
-// ═══════════════════════════════════════════════
 function updateUiStatus(msg, statusClass = '') {
   statusBadge.textContent = msg;
   statusBadge.className = statusClass;
@@ -371,19 +344,16 @@ function updateUiStatus(msg, statusClass = '') {
 fileInput.addEventListener('change', (e) => {
   const targetFile = e.target.files[0];
   if (!targetFile) return;
-  
   if (!targetFile.name.toLowerCase().endsWith('.stl')) {
     updateUiStatus('올바르지 않은 확장자 스캔 필터 ❌', 'error');
     return;
   }
-  
   updateUiStatus('파일 바이너리 디코딩 로드 중...', 'warn');
   const fileReader = new FileReader();
   fileReader.onload = (evt) => renderStlToScene(evt.target.result);
   fileReader.readAsArrayBuffer(targetFile);
 });
 
-// 드래그 앤 드롭 트리거 바인딩 파트
 const dropZone = document.getElementById('viewer-container');
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => document.body.classList.remove('drag-over'));
@@ -403,11 +373,9 @@ resetBtn.addEventListener('click', resetCameraViewport);
 
 window.addEventListener('load', () => {
   initThreeEngine();
-  
   hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
   hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
   hands.onResults(onCaptureResultHandler);
-
   loadingEl.classList.add('hidden');
-  updateUiStatus('대기 중 — 데이터 구조를 추가하세요');
+  updateUiStatus('대기 중 — 데이터를 추가하세요');
 });
