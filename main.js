@@ -4,7 +4,6 @@ let scene, camera, renderer, stlMesh;
 let hands, mpCamera;
 let cameraActive = false;
 
-// DOM 캐싱
 const loadingEl      = document.getElementById('loading');
 const statusBadge    = document.getElementById('status-badge');
 const gestureDisplay = document.getElementById('current-gesture');
@@ -27,7 +26,6 @@ const trackingFrame = {
   lastAnchorY: 0
 };
 
-// ── 3D 엔진 초기화 ──
 function initThreeEngine() {
   const container = document.getElementById('viewer-container');
   const canvas    = document.getElementById('three-canvas');
@@ -52,14 +50,10 @@ function initThreeEngine() {
     renderer.setSize(container.clientWidth, container.clientHeight);
   });
 
-  function renderTick() {
-    requestAnimationFrame(renderTick);
-    renderer.render(scene, camera);
-  }
+  function renderTick() { requestAnimationFrame(renderTick); renderer.render(scene, camera); }
   renderTick();
 }
 
-// ── STL 파서 ──
 function parseStlBinaryOrAscii(arrayBuffer) {
   const uint8View = new Uint8Array(arrayBuffer);
   const isAscii = () => new TextDecoder().decode(uint8View.slice(0, 128)).trim().startsWith('solid');
@@ -135,9 +129,9 @@ btnDemo.addEventListener('click', () => {
 
 function checkFingerState(landmarks, tip, dip) { return landmarks[tip].y < landmarks[dip].y; }
 
-// ── 제스처 파서 커널 고도화 (동작 분리) ──
+// ── 핵심 4대 제스처 커널 (☝️, ✌️, 🖐️, ✊ 완벽 일치 매핑) ──
 function processGestureParsing(landmarks) {
-  const thumb  = landmarks[4].x < landmarks[3].x; 
+  const thumb  = landmarks[4].y < landmarks[3].y;
   const index  = checkFingerState(landmarks, 8, 6);
   const middle = checkFingerState(landmarks, 12, 10);
   const ring   = checkFingerState(landmarks, 16, 14);
@@ -145,22 +139,15 @@ function processGestureParsing(landmarks) {
 
   const activeCount = [thumb, index, middle, ring, pinky].filter(Boolean).length;
 
-  // ⭐ 엄지 끝(4번)과 검지 끝(8번) 사이의 유클리드 거리 측정 (Pinch 판별용)
-  const dx = landmarks[4].x - landmarks[8].x;
-  const dy = landmarks[4].y - landmarks[8].y;
-  const pinchDistance = Math.sqrt(dx * dx + dy * dy);
-
-  // 1. 🖐️ 보자기 -> 확대
+  // 1. 🖐️ 모두 펼침 -> 확대
   if (activeCount >= 4) return 'zoom_in';
-  // 2. ✊ 주먹 -> 축소
+  // 2. ✊ 모두 쥠 -> 축소
   if (activeCount === 0) return 'zoom_out';
-  // 3. ✌️ 브이 -> 시선 이동
-  if (index && middle && !ring && !pinky) return 'pan';
-  
-  // 4. ⭐ 👌 엄지-검지 맞닿음 (거리 임계값 0.045 이하) -> 오직 수평 회전 전용
-  if (pinchDistance < 0.045 && !middle && !ring && !pinky) return 'rotate_horizontal';
-  
-  // 5. ☝️ 검지 하나만 세움 -> 오직 수직 회전 전용
+
+  // 3. ✌️ 검지와 중지만 폄 -> 수평 회전 전용 (손목 고정 상태로 완벽 작동)
+  if (index && middle && !ring && !pinky) return 'rotate_horizontal';
+
+  // 4. ☝️ 검지만 세움 -> 수직 회전 전용
   if (index && !middle && !ring && !pinky) return 'rotate_vertical';
 
   return 'none';
@@ -181,39 +168,27 @@ function onCaptureResultHandler(results) {
     
     const uiLabels = {
       none: '안정화 대기 모드 (정지)',
-      rotate_horizontal: '👌 오직 수평(좌우 ↔️) 회전 제어 중',
-      rotate_vertical: '☝️ 오직 수직(위아래 ↕️) 회전 제어 중',
-      pan: '✌️ 평면 초점 이동 중',
-      zoom_in: '🖐️ 초점 전진 (Zoom In)',
-      zoom_out: '✊ 초점 후퇴 (Zoom Out)'
-    };
+      rotate_horizontal: '✌️ 브이: 오직 수평(좌우 ↔️) 회전 제어 중',
+      rotate_vertical: '☝️ 검지: 오직 수직(위아래 ↕️) 회전 제어 중',
+      zoom_in: '🖐️ 보자기: 공간 확대 (Zoom In)',
+      zoom_out: '✊ 주먹: 공간 축소 (Zoom Out)'
+    </h5>
     gestureDisplay.textContent = uiLabels[computedGesture] || '추적 불능';
 
     if (stlMesh) {
       const currentX = singleHandPoints[9].x;
       const currentY = singleHandPoints[9].y;
-      const deadzone = 0.004;
+      const deadzone = 0.003;
 
-      // 움직인 변화량 계산
       const deltaX = (currentX - trackingFrame.lastAnchorX) * 5.0;
       const deltaY = (currentY - trackingFrame.lastAnchorY) * 5.0;
 
-      // 각 분리된 동작 상태에 매핑하여 정직하게 단일 축 회전 수행
+      // 완전 이원화 분리 작동
       if (computedGesture === 'rotate_horizontal' && trackingFrame.activeGesture === 'rotate_horizontal') {
-        if (Math.abs(deltaX) > deadzone) {
-          stlMesh.rotation.y += deltaX; // 오직 좌우 회전만 허용
-        }
+        if (Math.abs(deltaX) > deadzone) stlMesh.rotation.y += deltaX;
       } 
       else if (computedGesture === 'rotate_vertical' && trackingFrame.activeGesture === 'rotate_vertical') {
-        if (Math.abs(deltaY) > deadzone) {
-          stlMesh.rotation.x += deltaY; // 오직 위아래 회전만 허용
-        }
-      }
-      else if (computedGesture === 'pan' && trackingFrame.activeGesture === 'pan') {
-        const panX = (currentX - trackingFrame.lastAnchorX) * 5.5;
-        const panY = (currentY - trackingFrame.lastAnchorY) * -5.5;
-        if (Math.abs(panX) > 0.005) stlMesh.position.x -= panX;
-        if (Math.abs(panY) > 0.005) stlMesh.position.y -= panY;
+        if (Math.abs(deltaY) > deadzone) stlMesh.rotation.x += deltaY;
       }
       else if (computedGesture === 'zoom_in') {
         camera.position.z = Math.max(1.5, camera.position.z - 0.08);
