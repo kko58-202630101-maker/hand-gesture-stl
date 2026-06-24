@@ -163,7 +163,7 @@ function onCaptureResultHandler(results) {
     const computedGesture = processGestureParsing(singleHandPoints);
     const uiLabels = {
       none: '안정화 대기 모드 (정지)',
-      rotate: '☝️ 정밀 축 고정 회전 제어 중',
+      rotate: '☝️ 축 고정 회전 제어 중',
       pan: '✌️ 평면 초점 이동 중',
       zoom_in: '🖐️ 초점 전진 (Zoom In)',
       zoom_out: '✊ 초점 후퇴 (Zoom Out)'
