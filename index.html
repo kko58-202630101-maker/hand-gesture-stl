@@ -12,7 +12,7 @@
       background: #f8f9fa;
       color: #212529;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      overflow: hidden; /* 전체 페이지 스크롤 삭제 */
+      overflow: hidden;
       height: 100vh;
       width: 100vw;
     }
@@ -59,17 +59,17 @@
     #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
     #hand-canvas  { position: relative; z-index: 2; transform: scaleX(-1); }
 
-    /* ── 우측 통합 컨트롤 패널 (스마트 유연 레이아웃) ── */
+    /* ── 우측 통합 컨트롤 패널 ── */
     #ui-panel {
       width: 340px;
       background: #ffffff;
       border-left: 1px solid #e9ecef;
       display: flex;
       flex-direction: column;
-      padding: 20px 16px; /* 여백을 살짝 줄여 공간 확보 */
-      gap: 14px;          /* 간격을 촘촘하게 최적화 */
+      padding: 20px 16px;
+      gap: 14px;
       height: 100vh;
-      overflow: hidden;   /* 외부 스크롤 완벽 차단 */
+      overflow: hidden;
       box-shadow: -4px 0 24px rgba(0,0,0,0.02);
     }
 
@@ -86,21 +86,31 @@
       color: #868e96;
     }
 
-    /* ⭐ [UI/UX 핵심 수정] 화면이 작아지면 모션 가이드 영역만 압축 및 내부 스크롤 발생 */
+    /* 모션 가이드 박스 */
     .guide-box {
       background: #fdfdfd;
       border: 1px solid #e9ecef;
       border-radius: 12px;
       padding: 12px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.02);
-      flex: 1;               /* 남는 모든 수직 공간을 채우도록 유연하게 설정 */
-      min-height: 160px;     /* 최소 크기 보장 */
-      overflow-y: auto;      /* 내용이 넘치면 이 박스 안에서만 스크롤바 생성 */
+      flex: 1;
+      min-height: 160px;
+      overflow-y: auto;
     }
 
-    /* 스크롤바 디자인 슬림화 */
     .guide-box::-webkit-scrollbar { width: 4px; }
     .guide-box::-webkit-scrollbar-thumb { background: #dee2e6; border-radius: 2px; }
+
+    .gesture-group-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #228be6;
+      background: #e7f5ff;
+      padding: 4px 8px;
+      border-radius: 6px;
+      margin: 10px 0 6px 0;
+    }
+    .gesture-group-title:first-of-type { margin-top: 0; }
 
     .gesture-list {
       display: flex;
@@ -119,7 +129,7 @@
     }
 
     .gesture-icon {
-      font-size: 16px;
+      font-size: 15px;
       background: #ffffff;
       width: 28px;
       height: 28px;
@@ -151,7 +161,6 @@
       margin-bottom: 6px;
     }
 
-    /* 현재 인식 상태 박스 */
     #current-gesture {
       background: #f8f9fa;
       border: 1px solid #e9ecef;
@@ -163,7 +172,6 @@
       text-align: center;
     }
 
-    /* 하이브리드 제어 보드 버튼 그리드 */
     .control-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -185,9 +193,8 @@
     .btn-primary-action { background: #343a40; color: #ffffff; border-color: #343a40; }
     .btn-primary-action:hover { background: #212529; color: #ffffff; }
 
-    /* 맨 아래 파일 업로드 버튼 (절대 잘리지 않고 항상 하단 고정) */
     .footer-action {
-      margin-top: auto; /* 상단 요소들이 밀어내도 항상 가장 아래에 고정 */
+      margin-top: auto;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -226,10 +233,8 @@
       border: 1px solid #e9ecef;
     }
     #status-badge.ready  { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
-    #status-badge.warn   { background: #fff9db; color: #f08c00; border-color: #fff3bf; }
     #status-badge.error  { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
 
-    /* 로딩 오버레이 */
     #loading {
       position: fixed;
       inset: 0;
@@ -293,34 +298,40 @@
     </div>
 
     <div class="guide-box">
-      <div class="section-title" style="margin-bottom: 6px; color: #4dabf7;">실시간 모션 가이드 맵</div>
+      <div class="section-title" style="color: #4dabf7;">실시간 모션 가이드 맵</div>
+      
+      <div class="gesture-group-title">🔄 모델 회전 (손가락 개수 세트)</div>
       <div class="gesture-list">
         <div class="gesture-item">
           <div class="gesture-icon">☝️</div>
           <div class="gesture-desc">
             <strong>검지 1개 세우기</strong>
-            <p>모델 3D 정밀 방향 축 고정 회전</p>
+            <p>오직 수직 회전 제어 (위아래 ↕️)</p>
           </div>
         </div>
         <div class="gesture-item">
           <div class="gesture-icon">✌️</div>
           <div class="gesture-desc">
             <strong>검지 + 중지 브이</strong>
-            <p>카메라 시선 평면 위치 이동 (Pan)</p>
+            <p>오직 수평 회전 제어 (좌우 ↔️)</p>
           </div>
         </div>
+      </div>
+
+      <div class="gesture-group-title">🔎 크기 스케일 (손바닥 형태 세트)</div>
+      <div class="gesture-list">
         <div class="gesture-item">
           <div class="gesture-icon">🖐️</div>
           <div class="gesture-desc">
             <strong>보자기 쫙 펼치기</strong>
-            <p>모델을 가깝게 확대 (Zoom In)</p>
+            <p>모델 원격 확대 (Zoom In)</p>
           </div>
         </div>
         <div class="gesture-item">
           <div class="gesture-icon">✊</div>
           <div class="gesture-desc">
             <strong>주먹 꽉 쥐기</strong>
-            <p>모델을 멀리 축소 (Zoom Out)</p>
+            <p>모델 원격 축소 (Zoom Out)</p>
           </div>
         </div>
       </div>
