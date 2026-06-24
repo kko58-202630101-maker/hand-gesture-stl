@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hand Gesture STL Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0d0d0d;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #app {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ── 3D 뷰어 영역 ── */
+    #viewer-container {
+      flex: 1;
+      position: relative;
+    }
+
+    #three-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── 웹캠 오버레이 ── */
+    #webcam-wrapper {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 240px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #333;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+      background: #111;
+    }
+
+    #webcam-wrapper video,
+    #webcam-wrapper canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
+    #hand-canvas  { position: relative; z-index: 2; }
+
+    /* ── UI 패널 ── */
+    #ui-panel {
+      width: 260px;
+      background: #161616;
+      border-left: 1px solid #2a2a2a;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 16px;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    #ui-panel h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #fff;
+      border-bottom: 1px solid #2a2a2a;
+      padding-bottom: 12px;
+    }
+
+    /* 파일 업로드 */
+    #upload-btn {
+      display: block;
+      width: 100%;
+      padding: 10px 0;
+      background: #1e90ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.2s;
+    }
+    #upload-btn:hover { background: #1070cc; }
+    #file-input { display: none; }
+
+    /* 상태 뱃지 */
+    #status-badge {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: #222;
+      color: #888;
+      text-align: center;
+      min-height: 28px;
+    }
+    #status-badge.ready  { background: #0f2e0f; color: #4caf50; }
+    #status-badge.warn   { background: #2e1a0f; color: #ff9800; }
+    #status-badge.error  { background: #2e0f0f; color: #f44336; }
+
+    /* 제스처 가이드 */
+    .guide-section h2 {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 10px;
+    }
+
+    .gesture-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .gesture-icon {
+      font-size: 22px;
+      min-width: 32px;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    .gesture-desc {
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.5;
+    }
+
+    .gesture-desc strong {
+      display: block;
+      color: #ddd;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+
+    /* 현재 제스처 표시 */
+    #current-gesture {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      color: #1e90ff;
+      font-weight: 600;
+      text-align: center;
+      min-height: 36px;
+    }
+
+    /* 카메라 토글 */
+    #cam-btn {
+      width: 100%;
+      padding: 9px 0;
+      background: #222;
+      color: #ccc;
+      border: 1px solid #333;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #cam-btn:hover { background: #2a2a2a; }
+
+    /* 리셋 버튼 */
+    #reset-btn {
+      width: 100%;
+      padding: 9px 0;
+      background: #222;
+      color: #ccc;
+      border: 1px solid #333;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #reset-btn:hover { background: #2a2a2a; }
+
+    /* 로딩 오버레이 */
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      gap: 16px;
+    }
+    #loading.hidden { display: none; }
+    #loading p { font-size: 14px; color: #aaa; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #333;
+      border-top-color: #1e90ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 드래그 앤 드롭 하이라이트 */
+    body.drag-over #viewer-container::after {
+      content: 'STL 파일을 여기에 놓으세요';
+      position: absolute;
+      inset: 0;
+      background: rgba(30,144,255,0.15);
+      border: 3px dashed #1e90ff;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: #1e90ff;
+      z-index: 50;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>라이브러리 로딩 중…</p>
+</div>
+
+<div id="app">
+  <!-- 3D 뷰어 -->
+  <div id="viewer-container">
+    <canvas id="three-canvas"></canvas>
+
+    <!-- 웹캠 오버레이 -->
+    <div id="webcam-wrapper">
+      <video id="webcam-video" autoplay playsinline muted></video>
+      <canvas id="hand-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- 사이드 패널 -->
+  <div id="ui-panel">
+    <h1>✋ STL Gesture Viewer</h1>
+
+    <!-- 파일 업로드 -->
+    <div>
+      <input type="file" id="file-input" accept=".stl" />
+      <label for="file-input" id="upload-btn">📂 STL 파일 업로드</label>
+    </div>
+
+    <div id="status-badge">STL 파일을 업로드하세요</div>
+
+    <!-- 현재 제스처 -->
+    <div class="guide-section">
+      <h2>현재 감지</h2>
+      <div id="current-gesture">대기 중…</div>
+    </div>
+
+    <!-- 제스처 가이드 -->
+    <div class="guide-section">
+      <h2>제스처 가이드</h2>
+
+      <div class="gesture-item">
+        <div class="gesture-icon">☝️</div>
+        <div class="gesture-desc">
+          <strong>검지 1개 — 회전</strong>
+          손가락 하나로 움직여 3D 모델을 회전
+        </div>
+      </div>
+
+      <div class="gesture-item">
+        <div class="gesture-icon">✌️</div>
+        <div class="gesture-desc">
+          <strong>검지+중지 — 이동</strong>
+          두 손가락으로 모델 위치 이동
+        </div>
+      </div>
+
+      <div class="gesture-item">
+        <div class="gesture-icon">🤏</div>
+        <div class="gesture-desc">
+          <strong>엄지+검지 핀치 — 확대/축소</strong>
+          손가락 간격으로 줌 인/아웃
+        </div>
+      </div>
+
+      <div class="gesture-item">
+        <div class="gesture-icon">✋</div>
+        <div class="gesture-desc">
+          <strong>손 펼치기 — 정지</strong>
+          모든 동작을 일시 중지
+        </div>
+      </div>
+    </div>
+
+    <button id="cam-btn">📷 카메라 켜기/끄기</button>
+    <button id="reset-btn">🔄 뷰 초기화</button>
+  </div>
+</div>
+
+<!-- Three.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<!-- 앱 로직 -->
+<script src="main.js"></script>
+</body>
+</html>
