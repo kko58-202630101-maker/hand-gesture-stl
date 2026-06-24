@@ -3,11 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Premium Hand Gesture & Controls STL Viewer</title>
+  <title>Space Workspace - 3D STL Viewer</title>
   <style>
-    /* ── 프리미엄 모던 라이트 테마 ── */
+    /* ── BASE RESET & CORE THEME ── */
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
       background: #f8f9fa;
       color: #212529;
@@ -16,27 +15,16 @@
       height: 100vh;
       width: 100vw;
     }
+    #app { display: flex; height: 100vh; width: 100vw; }
 
-    #app {
-      display: flex;
-      height: 100vh;
-      width: 100vw;
-    }
-
-    /* ── 3D 뷰어 영역 ── */
+    /* ── LEFT: 3D VIEWPORT & WEBCAM OVERLAY ── */
     #viewer-container {
       flex: 1;
       position: relative;
       background: radial-gradient(circle at center, #ffffff 0%, #f1f3f5 100%);
     }
-
-    #three-canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* ── 웹캠 피드 오버레이 (좌측 하단 플로팅) ── */
+    #three-canvas { display: block; width: 100%; height: 100%; }
+    
     #webcam-wrapper {
       position: absolute;
       bottom: 24px;
@@ -44,22 +32,15 @@
       width: 260px;
       border-radius: 16px;
       overflow: hidden;
-      border: 1px solid rgba(0,0,0,0.08);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
       background: #ffffff;
     }
-
-    #webcam-wrapper video,
-    #webcam-wrapper canvas {
-      display: block;
-      width: 100%;
-      height: auto;
-    }
-
+    #webcam-wrapper video, #webcam-wrapper canvas { display: block; width: 100%; height: auto; }
     #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
-    #hand-canvas  { position: relative; z-index: 2; transform: scaleX(-1); }
+    #hand-canvas { position: relative; z-index: 2; transform: scaleX(-1); }
 
-    /* ── 우측 통합 컨트롤 패널 ── */
+    /* ── RIGHT: CONTROL PANEL (FLEX LAYOUT) ── */
     #ui-panel {
       width: 340px;
       background: #ffffff;
@@ -67,220 +48,75 @@
       display: flex;
       flex-direction: column;
       padding: 20px 16px;
-      gap: 14px;
+      gap: 16px; /* 전체 요소 간격 확보 */
       height: 100vh;
       overflow: hidden;
-      box-shadow: -4px 0 24px rgba(0,0,0,0.02);
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.02);
     }
+    .panel-header h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #111111; margin-bottom: 2px; }
+    .panel-header p { font-size: 11px; color: #868e96; }
+    .section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #adb5bd; margin-bottom: 6px; }
 
-    .panel-header h1 {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      color: #111111;
-      margin-bottom: 2px;
-    }
-    
-    .panel-header p {
-      font-size: 11px;
-      color: #868e96;
-    }
-
-    /* 모션 가이드 박스 */
+    /* ── COMPONENTS (가이드 박스 슬림화) ── */
     .guide-box {
       background: #fdfdfd;
       border: 1px solid #e9ecef;
       border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+      padding: 8px 10px; /* 내부 여백 축소 */
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
       flex: 1;
-      min-height: 160px;
+      min-height: 140px;
       overflow-y: auto;
     }
-
     .guide-box::-webkit-scrollbar { width: 4px; }
     .guide-box::-webkit-scrollbar-thumb { background: #dee2e6; border-radius: 2px; }
 
-    .gesture-group-title {
-      font-size: 11px;
-      font-weight: 800;
-      color: #228be6;
-      background: #e7f5ff;
-      padding: 4px 8px;
-      border-radius: 6px;
-      margin: 10px 0 6px 0;
-    }
-    .gesture-group-title:first-of-type { margin-top: 0; }
+    .gesture-list { display: flex; flex-direction: column; gap: 4px; } /* 리스트 간격 좁힘 */
+    .gesture-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: #f8f9fa; border-radius: 6px; border: 1px solid #f1f3f5; }
+    .gesture-icon { font-size: 14px; background: #ffffff; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 5px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03); }
+    .gesture-desc strong { display: block; color: #343a40; font-size: 11px; font-weight: 700; }
+    .gesture-desc p { font-size: 10px; color: #868e96; }
 
-    .gesture-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
+    #current-gesture { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; padding: 8px; font-size: 12px; color: #228be6; font-weight: 700; text-align: center; }
 
-    .gesture-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 8px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      border: 1px solid #f1f3f5;
-    }
-
-    .gesture-icon {
-      font-size: 15px;
-      background: #ffffff;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 6px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-    }
-
-    .gesture-desc strong {
-      display: block;
-      color: #343a40;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    
-    .gesture-desc p {
-      font-size: 10px;
-      color: #868e96;
-    }
-
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #adb5bd;
-      margin-bottom: 6px;
-    }
-
-    #current-gesture {
-      background: #f8f9fa;
-      border: 1px solid #e9ecef;
-      border-radius: 10px;
-      padding: 8px;
-      font-size: 12px;
-      color: #228be6;
-      font-weight: 700;
-      text-align: center;
-    }
-
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 5px;
-    }
-    
-    .btn-ctrl {
-      padding: 8px;
-      background: #ffffff;
-      border: 1px solid #dee2e6;
-      color: #495057;
-      border-radius: 8px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-    }
+    .control-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+    .btn-ctrl { padding: 8px; background: #ffffff; border: 1px solid #dee2e6; color: #495057; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
     .btn-ctrl:hover { background: #f8f9fa; color: #212529; }
     .btn-full { grid-column: span 2; }
     .btn-primary-action { background: #343a40; color: #ffffff; border-color: #343a40; }
     .btn-primary-action:hover { background: #212529; color: #ffffff; }
 
-    .footer-action {
-      margin-top: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
+    /* ── FOOTER ACTIONS ── */
+    .footer-action { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
     #upload-label {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 11px;
-      background: #4dabf7;
-      color: #ffffff;
-      border-radius: 12px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 12px rgba(77, 171, 247, 0.25);
+      display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 11px;
+      background: #4dabf7; color: #ffffff; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(77, 171, 247, 0.25);
     }
-    #upload-label:hover { 
-      background: #339af0;
-      box-shadow: 0 6px 16px rgba(51, 154, 240, 0.35);
-    }
+    #upload-label:hover { background: #339af0; box-shadow: 0 6px 16px rgba(51, 154, 240, 0.35); }
     #file-input { display: none; }
 
-    #status-badge {
-      font-size: 11px;
-      padding: 7px;
-      border-radius: 8px;
-      background: #f1f3f5;
-      color: #495057;
-      text-align: center;
-      font-weight: 500;
-      border: 1px solid #e9ecef;
-    }
-    #status-badge.ready  { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
-    #status-badge.error  { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
+    #status-badge { font-size: 11px; padding: 7px; border-radius: 8px; background: #f1f3f5; color: #495057; text-align: center; font-weight: 500; border: 1px solid #e9ecef; }
+    #status-badge.ready { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
+    #status-badge.warn { background: #fff9db; color: #f08c00; border-color: #fff3bf; }
+    #status-badge.error { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
 
-    #loading {
-      position: fixed;
-      inset: 0;
-      background: #ffffff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      gap: 16px;
-    }
+    /* ── LOADING OVERLAY ── */
+    #loading { position: fixed; inset: 0; background: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; gap: 16px; }
     #loading.hidden { opacity: 0; pointer-events: none; transition: opacity 0.4s ease; }
-    
-    .spinner {
-      width: 48px; height: 48px;
-      border: 4px solid #f1f3f5;
-      border-top-color: #4dabf7;
-      border-radius: 50%;
-      animation: spin 0.8s cubic-bezier(0.6, 0.2, 0.1, 1) infinite;
-    }
+    .spinner { width: 48px; height: 48px; border: 4px solid #f1f3f5; border-top-color: #4dabf7; border-radius: 50%; animation: spin 0.8s cubic-bezier(0.6, 0.2, 0.1, 1) infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     body.drag-over #viewer-container::after {
-      content: '📥 STL 파일을 여기에 내려놓으세요';
-      position: absolute;
-      inset: 16px;
-      background: rgba(77, 171, 247, 0.08);
-      border: 2px dashed #4dabf7;
-      border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      font-weight: 700;
-      color: #228be6;
-      backdrop-filter: blur(4px);
-      z-index: 50;
+      content: '📥 STL 파일을 여기에 내려놓으세요'; position: absolute; inset: 16px; background: rgba(77, 171, 247, 0.08);
+      border: 2px dashed #4dabf7; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 700; color: #228be6; backdrop-filter: blur(4px); z-index: 50;
     }
   </style>
 </head>
 <body>
 
-<div id="loading">
-  <div class="spinner"></div>
-  <p>공간 미디어인식 엔진 구동 중…</p>
-</div>
+<div id="loading"><div class="spinner"></div><p>공간 미디어인식 엔진 구동 중…</p></div>
 
 <div id="app">
   <div id="viewer-container">
@@ -298,41 +134,23 @@
     </div>
 
     <div class="guide-box">
-      <div class="section-title" style="color: #4dabf7;">실시간 모션 가이드 맵</div>
-      
-      <div class="gesture-group-title">🔄 모델 회전 (손가락 개수 세트)</div>
+      <div class="section-title" style="margin-bottom: 4px; color: #4dabf7;">실시간 모션 가이드 맵</div>
       <div class="gesture-list">
         <div class="gesture-item">
           <div class="gesture-icon">☝️</div>
-          <div class="gesture-desc">
-            <strong>검지 1개 세우기</strong>
-            <p>오직 수직 회전 제어 (위아래 ↕️)</p>
-          </div>
+          <div class="gesture-desc"><strong>검지 1개 세우기</strong><p>모델 3D 정밀 방향 축 고정 회전</p></div>
         </div>
         <div class="gesture-item">
           <div class="gesture-icon">✌️</div>
-          <div class="gesture-desc">
-            <strong>검지 + 중지 브이</strong>
-            <p>오직 수평 회전 제어 (좌우 ↔️)</p>
-          </div>
+          <div class="gesture-desc"><strong>검지 + 중지 브이</strong><p>카메라 시선 평면 위치 이동 (Pan)</p></div>
         </div>
-      </div>
-
-      <div class="gesture-group-title">🔎 크기 스케일 (손바닥 형태 세트)</div>
-      <div class="gesture-list">
         <div class="gesture-item">
           <div class="gesture-icon">🖐️</div>
-          <div class="gesture-desc">
-            <strong>보자기 쫙 펼치기</strong>
-            <p>모델 원격 확대 (Zoom In)</p>
-          </div>
+          <div class="gesture-desc"><strong>보자기 쫙 펼치기</strong><p>모델을 가깝게 확대 (Zoom In)</p></div>
         </div>
         <div class="gesture-item">
           <div class="gesture-icon">✊</div>
-          <div class="gesture-desc">
-            <strong>주먹 꽉 쥐기</strong>
-            <p>모델 원격 축소 (Zoom Out)</p>
-          </div>
+          <div class="gesture-desc"><strong>주먹 꽉 쥐기</strong><p>모델을 멀리 축소 (Zoom Out)</p></div>
         </div>
       </div>
     </div>
