@@ -1,361 +1,272 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Premium Hand Gesture & Controls STL Viewer</title>
-  <style>
-    /* ── 프리미엄 모던 라이트 테마 ── */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+'use strict';
 
-    body {
-      background: #f8f9fa;
-      color: #212529;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      overflow: hidden; /* 전체 페이지 스크롤 삭제 */
-      height: 100vh;
-      width: 100vw;
+let scene, camera, renderer, stlMesh;
+let hands, mpCamera;
+let cameraActive = false;
+
+// DOM 캐싱
+const loadingEl      = document.getElementById('loading');
+const statusBadge    = document.getElementById('status-badge');
+const gestureDisplay = document.getElementById('current-gesture');
+const fileInput      = document.getElementById('file-input');
+const camBtn         = document.getElementById('cam-btn');
+const resetBtn       = document.getElementById('reset-btn');
+const webcamVideo    = document.getElementById('webcam-video');
+const handCanvas     = document.getElementById('hand-canvas');
+const handCtx        = handCanvas.getContext('2d');
+
+const btnZoomIn   = document.getElementById('btn-zoom-in');
+const btnZoomOut  = document.getElementById('btn-zoom-out');
+const btnRotLeft  = document.getElementById('btn-rot-left');
+const btnRotRight = document.getElementById('btn-rot-right');
+const btnDemo     = document.getElementById('btn-demo');
+
+const trackingFrame = {
+  activeGesture: 'none',
+  lastAnchorX: 0,
+  lastAnchorY: 0
+};
+
+// ── 3D 엔진 초기화 ──
+function initThreeEngine() {
+  const container = document.getElementById('viewer-container');
+  const canvas    = document.getElementById('three-canvas');
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+  camera.position.set(0, 0, 6);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  mainLight.position.set(4, 8, 5);
+  scene.add(mainLight);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  });
+
+  function renderTick() {
+    requestAnimationFrame(renderTick);
+    renderer.render(scene, camera);
+  }
+  renderTick();
+}
+
+// ── STL 파서 ──
+function parseStlBinaryOrAscii(arrayBuffer) {
+  const uint8View = new Uint8Array(arrayBuffer);
+  const isAscii = () => new TextDecoder().decode(uint8View.slice(0, 128)).trim().startsWith('solid');
+  const geometry = new THREE.BufferGeometry();
+  const vertices = [], normals = [];
+
+  if (isAscii()) {
+    const lines = new TextDecoder().decode(uint8View).split('\n');
+    let currNormal = [0, 0, 0];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('facet normal')) {
+        const c = line.split(/\s+/); currNormal = [parseFloat(c[2]), parseFloat(c[3]), parseFloat(c[4])];
+      } else if (line.startsWith('vertex')) {
+        const c = line.split(/\s+/); vertices.push(parseFloat(c[1]), parseFloat(c[2]), parseFloat(c[3]));
+        normals.push(...currNormal);
+      }
     }
-
-    #app {
-      display: flex;
-      height: 100vh;
-      width: 100vw;
+  } else {
+    const dataView = new DataView(arrayBuffer);
+    const total = dataView.getUint32(80, true);
+    for (let i = 0; i < total; i++) {
+      const offset = 84 + i * 50;
+      const nx = dataView.getFloat32(offset, true), ny = dataView.getFloat32(offset+4, true), nz = dataView.getFloat32(offset+8, true);
+      for (let v = 0; v < 3; v++) {
+        const vOffset = offset + 12 + v * 12;
+        vertices.push(dataView.getFloat32(vOffset, true), dataView.getFloat32(vOffset+4, true), dataView.getFloat32(vOffset+8, true));
+        normals.push(nx, ny, nz);
+      }
     }
+  }
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  return geometry;
+}
 
-    /* ── 3D 뷰어 영역 ── */
-    #viewer-container {
-      flex: 1;
-      position: relative;
-      background: radial-gradient(circle at center, #ffffff 0%, #f1f3f5 100%);
-    }
+function renderStlToScene(buffer) {
+  try {
+    const geometry = parseStlBinaryOrAscii(buffer);
+    if (stlMesh) { scene.remove(stlMesh); stlMesh.geometry.dispose(); stlMesh.material.dispose(); }
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    const center = new THREE.Vector3(); box.getCenter(center);
+    geometry.translate(-center.x, -center.y, -center.z);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const scale = 3.5 / Math.max(size.x, size.y, size.z);
 
-    #three-canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
+    stlMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x4dabf7, metalness: 0.2, roughness: 0.3, side: THREE.DoubleSide }));
+    stlMesh.scale.setScalar(scale);
+    stlMesh.rotation.x = -Math.PI / 2;
+    scene.add(stlMesh);
+    resetCameraViewport();
+    updateUiStatus('오브젝트 마운트 완결 ✅', 'ready');
+  } catch (ex) { updateUiStatus('파일 해석 실패 ❌', 'error'); }
+}
 
-    /* ── 웹캠 피드 오버레이 (좌측 하단 플로팅) ── */
-    #webcam-wrapper {
-      position: absolute;
-      bottom: 24px;
-      left: 24px;
-      width: 260px;
-      border-radius: 16px;
-      overflow: hidden;
-      border: 1px solid rgba(0,0,0,0.08);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.12);
-      background: #ffffff;
-    }
+function resetCameraViewport() {
+  camera.position.set(0, 0, 6);
+  camera.lookAt(0, 0, 0);
+  if (stlMesh) { stlMesh.position.set(0, 0, 0); stlMesh.rotation.set(-Math.PI / 2, 0, 0); }
+  updateUiStatus('뷰포트 정렬 초기화 스캔', 'ready');
+}
 
-    #webcam-wrapper video,
-    #webcam-wrapper canvas {
-      display: block;
-      width: 100%;
-      height: auto;
-    }
+btnZoomIn.addEventListener('click', () => { camera.position.z = Math.max(1, camera.position.z - 0.5); });
+btnZoomOut.addEventListener('click', () => { camera.position.z = Math.min(25, camera.position.z + 0.5); });
+btnRotLeft.addEventListener('click', () => { if (stlMesh) stlMesh.rotation.z -= 0.2; });
+btnRotRight.addEventListener('click', () => { if (stlMesh) stlMesh.rotation.z += 0.2; });
+btnDemo.addEventListener('click', () => {
+  if (stlMesh) scene.remove(stlMesh);
+  stlMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: 0xff922b }));
+  scene.add(stlMesh); resetCameraViewport(); updateUiStatus('샘플 프리셋 로드 완료', 'ready');
+});
 
-    #webcam-video { position: absolute; opacity: 0; pointer-events: none; }
-    #hand-canvas  { position: relative; z-index: 2; transform: scaleX(-1); }
+function checkFingerState(landmarks, tip, dip) { return landmarks[tip].y < landmarks[dip].y; }
 
-    /* ── 우측 통합 컨트롤 패널 (스마트 유연 레이아웃) ── */
-    #ui-panel {
-      width: 340px;
-      background: #ffffff;
-      border-left: 1px solid #e9ecef;
-      display: flex;
-      flex-direction: column;
-      padding: 20px 16px; /* 여백을 살짝 줄여 공간 확보 */
-      gap: 14px;          /* 간격을 촘촘하게 최적화 */
-      height: 100vh;
-      overflow: hidden;   /* 외부 스크롤 완벽 차단 */
-      box-shadow: -4px 0 24px rgba(0,0,0,0.02);
-    }
+// ── 제스처 파서 커널 고도화 (동작 분리) ──
+function processGestureParsing(landmarks) {
+  const thumb  = landmarks[4].x < landmarks[3].x; 
+  const index  = checkFingerState(landmarks, 8, 6);
+  const middle = checkFingerState(landmarks, 12, 10);
+  const ring   = checkFingerState(landmarks, 16, 14);
+  const pinky  = checkFingerState(landmarks, 20, 18);
 
-    .panel-header h1 {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      color: #111111;
-      margin-bottom: 2px;
-    }
+  const activeCount = [thumb, index, middle, ring, pinky].filter(Boolean).length;
+
+  // ⭐ 엄지 끝(4번)과 검지 끝(8번) 사이의 유클리드 거리 측정 (Pinch 판별용)
+  const dx = landmarks[4].x - landmarks[8].x;
+  const dy = landmarks[4].y - landmarks[8].y;
+  const pinchDistance = Math.sqrt(dx * dx + dy * dy);
+
+  // 1. 🖐️ 보자기 -> 확대
+  if (activeCount >= 4) return 'zoom_in';
+  // 2. ✊ 주먹 -> 축소
+  if (activeCount === 0) return 'zoom_out';
+  // 3. ✌️ 브이 -> 시선 이동
+  if (index && middle && !ring && !pinky) return 'pan';
+  
+  // 4. ⭐ 👌 엄지-검지 맞닿음 (거리 임계값 0.045 이하) -> 오직 수평 회전 전용
+  if (pinchDistance < 0.045 && !middle && !ring && !pinky) return 'rotate_horizontal';
+  
+  // 5. ☝️ 검지 하나만 세움 -> 오직 수직 회전 전용
+  if (index && !middle && !ring && !pinky) return 'rotate_vertical';
+
+  return 'none';
+}
+
+// ── MEDIAPIPE CORE PIPELINE ──
+function onCaptureResultHandler(results) {
+  handCtx.save();
+  handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+  
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const singleHandPoints = results.multiHandLandmarks[0];
     
-    .panel-header p {
-      font-size: 11px;
-      color: #868e96;
-    }
+    drawConnectors(handCtx, singleHandPoints, HAND_CONNECTIONS, { color: '#4dabf7', lineWidth: 3 });
+    drawLandmarks(handCtx, singleHandPoints, { color: '#ff922b', radius: 5 });
 
-    /* ⭐ [UI/UX 핵심 수정] 화면이 작아지면 모션 가이드 영역만 압축 및 내부 스크롤 발생 */
-    .guide-box {
-      background: #fdfdfd;
-      border: 1px solid #e9ecef;
-      border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.02);
-      flex: 1;               /* 남는 모든 수직 공간을 채우도록 유연하게 설정 */
-      min-height: 160px;     /* 최소 크기 보장 */
-      overflow-y: auto;      /* 내용이 넘치면 이 박스 안에서만 스크롤바 생성 */
-    }
-
-    /* 스크롤바 디자인 슬림화 */
-    .guide-box::-webkit-scrollbar { width: 4px; }
-    .guide-box::-webkit-scrollbar-thumb { background: #dee2e6; border-radius: 2px; }
-
-    .gesture-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .gesture-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 8px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      border: 1px solid #f1f3f5;
-    }
-
-    .gesture-icon {
-      font-size: 16px;
-      background: #ffffff;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 6px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-    }
-
-    .gesture-desc strong {
-      display: block;
-      color: #343a40;
-      font-size: 11px;
-      font-weight: 700;
-    }
+    const computedGesture = processGestureParsing(singleHandPoints);
     
-    .gesture-desc p {
-      font-size: 10px;
-      color: #868e96;
+    const uiLabels = {
+      none: '안정화 대기 모드 (정지)',
+      rotate_horizontal: '👌 오직 수평(좌우 ↔️) 회전 제어 중',
+      rotate_vertical: '☝️ 오직 수직(위아래 ↕️) 회전 제어 중',
+      pan: '✌️ 평면 초점 이동 중',
+      zoom_in: '🖐️ 초점 전진 (Zoom In)',
+      zoom_out: '✊ 초점 후퇴 (Zoom Out)'
+    };
+    gestureDisplay.textContent = uiLabels[computedGesture] || '추적 불능';
+
+    if (stlMesh) {
+      const currentX = singleHandPoints[9].x;
+      const currentY = singleHandPoints[9].y;
+      const deadzone = 0.004;
+
+      // 움직인 변화량 계산
+      const deltaX = (currentX - trackingFrame.lastAnchorX) * 5.0;
+      const deltaY = (currentY - trackingFrame.lastAnchorY) * 5.0;
+
+      // 각 분리된 동작 상태에 매핑하여 정직하게 단일 축 회전 수행
+      if (computedGesture === 'rotate_horizontal' && trackingFrame.activeGesture === 'rotate_horizontal') {
+        if (Math.abs(deltaX) > deadzone) {
+          stlMesh.rotation.y += deltaX; // 오직 좌우 회전만 허용
+        }
+      } 
+      else if (computedGesture === 'rotate_vertical' && trackingFrame.activeGesture === 'rotate_vertical') {
+        if (Math.abs(deltaY) > deadzone) {
+          stlMesh.rotation.x += deltaY; // 오직 위아래 회전만 허용
+        }
+      }
+      else if (computedGesture === 'pan' && trackingFrame.activeGesture === 'pan') {
+        const panX = (currentX - trackingFrame.lastAnchorX) * 5.5;
+        const panY = (currentY - trackingFrame.lastAnchorY) * -5.5;
+        if (Math.abs(panX) > 0.005) stlMesh.position.x -= panX;
+        if (Math.abs(panY) > 0.005) stlMesh.position.y -= panY;
+      }
+      else if (computedGesture === 'zoom_in') {
+        camera.position.z = Math.max(1.5, camera.position.z - 0.08);
+      }
+      else if (computedGesture === 'zoom_out') {
+        camera.position.z = Math.min(22.0, camera.position.z - 0.08);
+      }
+
+      trackingFrame.activeGesture = computedGesture;
+      trackingFrame.lastAnchorX = currentX;
+      trackingFrame.lastAnchorY = currentY;
     }
+  } else {
+    gestureDisplay.textContent = '손 감지 범위 이탈';
+    trackingFrame.activeGesture = 'none';
+  }
+  handCtx.restore();
+}
 
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #adb5bd;
-      margin-bottom: 6px;
-    }
+async function bootCameraVision() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+    webcamVideo.srcObject = stream; await webcamVideo.play();
+    handCanvas.width = webcamVideo.videoWidth; handCanvas.height = webcamVideo.videoHeight;
 
-    /* 현재 인식 상태 박스 */
-    #current-gesture {
-      background: #f8f9fa;
-      border: 1px solid #e9ecef;
-      border-radius: 10px;
-      padding: 8px;
-      font-size: 12px;
-      color: #228be6;
-      font-weight: 700;
-      text-align: center;
-    }
+    mpCamera = new Camera(webcamVideo, {
+      onFrame: async () => { if (cameraActive) await hands.send({ image: webcamVideo }); }, width: 640, height: 480
+    });
+    mpCamera.start(); cameraActive = true; updateUiStatus('비전 엔진 정상 가동 개시', 'ready');
+  } catch (err) { updateUiStatus('카메라 권한 에러 ❌', 'error'); }
+}
 
-    /* 하이브리드 제어 보드 버튼 그리드 */
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 5px;
-    }
-    
-    .btn-ctrl {
-      padding: 8px;
-      background: #ffffff;
-      border: 1px solid #dee2e6;
-      color: #495057;
-      border-radius: 8px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .btn-ctrl:hover { background: #f8f9fa; color: #212529; }
-    .btn-full { grid-column: span 2; }
-    .btn-primary-action { background: #343a40; color: #ffffff; border-color: #343a40; }
-    .btn-primary-action:hover { background: #212529; color: #ffffff; }
+function terminateCameraVision() {
+  if (mpCamera) { mpCamera.stop(); mpCamera = null; }
+  if (webcamVideo.srcObject) { webcamVideo.srcObject.getTracks().forEach(t => t.stop()); webcamVideo.srcObject = null; }
+  handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+  cameraActive = false; gestureDisplay.textContent = '카메라 셧다운'; updateUiStatus('분석 카메라 정지 상태', '');
+}
 
-    /* 맨 아래 파일 업로드 버튼 (절대 잘리지 않고 항상 하단 고정) */
-    .footer-action {
-      margin-top: auto; /* 상단 요소들이 밀어내도 항상 가장 아래에 고정 */
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
+function updateUiStatus(msg, statusClass = '') { statusBadge.textContent = msg; statusBadge.className = statusClass; }
 
-    #upload-label {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 11px;
-      background: #4dabf7;
-      color: #ffffff;
-      border-radius: 12px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 12px rgba(77, 171, 247, 0.25);
-    }
-    #upload-label:hover { 
-      background: #339af0;
-      box-shadow: 0 6px 16px rgba(51, 154, 240, 0.35);
-    }
-    #file-input { display: none; }
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0]; if (!file || !file.name.toLowerCase().endsWith('.stl')) return;
+  const reader = new FileReader(); reader.onload = (evt) => renderStlToScene(evt.target.result); reader.readAsArrayBuffer(file);
+});
 
-    #status-badge {
-      font-size: 11px;
-      padding: 7px;
-      border-radius: 8px;
-      background: #f1f3f5;
-      color: #495057;
-      text-align: center;
-      font-weight: 500;
-      border: 1px solid #e9ecef;
-    }
-    #status-badge.ready  { background: #e6fcf5; color: #0ca678; border-color: #c3fae8; }
-    #status-badge.warn   { background: #fff9db; color: #f08c00; border-color: #fff3bf; }
-    #status-badge.error  { background: #fff5f5; color: #f03e3e; border-color: #ffe3e3; }
+camBtn.addEventListener('click', () => { if (cameraActive) terminateCameraVision(); else bootCameraVision(); });
+resetBtn.addEventListener('click', resetCameraViewport);
 
-    /* 로딩 오버레이 */
-    #loading {
-      position: fixed;
-      inset: 0;
-      background: #ffffff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      gap: 16px;
-    }
-    #loading.hidden { opacity: 0; pointer-events: none; transition: opacity 0.4s ease; }
-    
-    .spinner {
-      width: 48px; height: 48px;
-      border: 4px solid #f1f3f5;
-      border-top-color: #4dabf7;
-      border-radius: 50%;
-      animation: spin 0.8s cubic-bezier(0.6, 0.2, 0.1, 1) infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    body.drag-over #viewer-container::after {
-      content: '📥 STL 파일을 여기에 내려놓으세요';
-      position: absolute;
-      inset: 16px;
-      background: rgba(77, 171, 247, 0.08);
-      border: 2px dashed #4dabf7;
-      border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      font-weight: 700;
-      color: #228be6;
-      backdrop-filter: blur(4px);
-      z-index: 50;
-    }
-  </style>
-</head>
-<body>
-
-<div id="loading">
-  <div class="spinner"></div>
-  <p>공간 미디어인식 엔진 구동 중…</p>
-</div>
-
-<div id="app">
-  <div id="viewer-container">
-    <canvas id="three-canvas"></canvas>
-    <div id="webcam-wrapper">
-      <video id="webcam-video" autoplay playsinline muted></video>
-      <canvas id="hand-canvas"></canvas>
-    </div>
-  </div>
-
-  <div id="ui-panel">
-    <div class="panel-header">
-      <h1>✋ Space Workspace</h1>
-      <p>손동작과 정밀 인터페이스의 만남</p>
-    </div>
-
-    <div class="guide-box">
-      <div class="section-title" style="margin-bottom: 6px; color: #4dabf7;">실시간 모션 가이드 맵</div>
-      <div class="gesture-list">
-        <div class="gesture-item">
-          <div class="gesture-icon">☝️</div>
-          <div class="gesture-desc">
-            <strong>검지 1개 세우기</strong>
-            <p>모델 3D 정밀 방향 축 고정 회전</p>
-          </div>
-        </div>
-        <div class="gesture-item">
-          <div class="gesture-icon">✌️</div>
-          <div class="gesture-desc">
-            <strong>검지 + 중지 브이</strong>
-            <p>카메라 시선 평면 위치 이동 (Pan)</p>
-          </div>
-        </div>
-        <div class="gesture-item">
-          <div class="gesture-icon">🖐️</div>
-          <div class="gesture-desc">
-            <strong>보자기 쫙 펼치기</strong>
-            <p>모델을 가깝게 확대 (Zoom In)</p>
-          </div>
-        </div>
-        <div class="gesture-item">
-          <div class="gesture-icon">✊</div>
-          <div class="gesture-desc">
-            <strong>주먹 꽉 쥐기</strong>
-            <p>모델을 멀리 축소 (Zoom Out)</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <div class="section-title">제스처 센서 피드백</div>
-      <div id="current-gesture">대기 모드</div>
-    </div>
-
-    <div>
-      <div class="section-title">하이브리드 조작 데스크</div>
-      <div class="control-grid">
-        <button class="btn-ctrl btn-primary-action" id="cam-btn">📷 비디오 분석 On/Off</button>
-        <button class="btn-ctrl" id="reset-btn">🔄 카메라 시선 리셋</button>
-        <button class="btn-ctrl" id="btn-zoom-in">➕ 수동 확대</button>
-        <button class="btn-ctrl" id="btn-zoom-out">➖ 수동 축소</button>
-        <button class="btn-ctrl" id="btn-rot-left">↩️ 좌회전</button>
-        <button class="btn-ctrl" id="btn-rot-right">↪️ 우회전</button>
-        <button class="btn-ctrl btn-full" id="btn-demo">📦 샘플 프리셋 큐브 생성</button>
-      </div>
-    </div>
-
-    <div class="footer-action">
-      <input type="file" id="file-input" accept=".stl" />
-      <label for="file-input" id="upload-label">📂 STL 3D 모델 불러오기</label>
-      <div id="status-badge">대기 중 — 데이터를 추가하세요</div>
-    </div>
-  </div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-<script src="main.js"></script>
-</body>
-</html>
+window.addEventListener('load', () => {
+  initThreeEngine();
+  hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
+  hands.onResults(onCaptureResultHandler);
+  loadingEl.classList.add('hidden');
+});
